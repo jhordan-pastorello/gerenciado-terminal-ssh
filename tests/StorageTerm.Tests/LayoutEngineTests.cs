@@ -155,6 +155,31 @@ public class SshCommandBuilderTests
     {
         Assert.Throws<ArgumentException>(() => SshCommandBuilder.Build("storage;calc"));
     }
+
+    [Fact]
+    public void Build_WithPersistentSession_AddsTmuxReattach()
+    {
+        var command = SshCommandBuilder.Build("storage-lan", "storage-1");
+
+        Assert.Contains(" -t ", command);
+        Assert.Contains("new-session -A -s storage-1", command);
+        Assert.Contains("extended-keys off", command);
+        Assert.Contains("exec bash -l", command);
+    }
+
+    [Fact]
+    public void Build_WithoutPersistentSession_DoesNotUseTmux()
+    {
+        var command = SshCommandBuilder.Build("storage-lan");
+
+        Assert.DoesNotContain("tmux", command);
+    }
+
+    [Fact]
+    public void Build_RejectsUnsafeSessionName()
+    {
+        Assert.Throws<ArgumentException>(() => SshCommandBuilder.Build("storage-lan", "storage;calc"));
+    }
 }
 
 public class UpdateServiceTests

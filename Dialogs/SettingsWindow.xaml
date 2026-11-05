@@ -21,30 +21,16 @@
         <Border Grid.Row="0" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1">
             <Border.Background>
                 <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                    <GradientStop Color="#0C1519" Offset="0" />
-                    <GradientStop Color="#050607" Offset="1" />
+                    <GradientStop Color="#111111" Offset="0" />
+                    <GradientStop Color="#0A0A0A" Offset="1" />
                 </LinearGradientBrush>
             </Border.Background>
-            <Grid Margin="26,22,26,18">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <StackPanel>
-                    <TextBlock Text="Configurações" FontFamily="{StaticResource DisplayFont}"
-                               FontSize="22" FontWeight="SemiBold" />
-                    <TextBlock Text="Conexões SSH, sessões e comportamento do aplicativo."
-                               FontSize="12.5" Foreground="{StaticResource TextDimBrush}" Margin="0,5,0,0" />
-                </StackPanel>
-                <Border Grid.Column="1" Width="44" Height="44" CornerRadius="12"
-                        Background="#0B2220" BorderBrush="#1B4A44" BorderThickness="1"
-                        VerticalAlignment="Center">
-                    <Path Data="{StaticResource IconSettings}" Width="20" Height="20" Stretch="Uniform"
-                          Fill="{StaticResource AccentBrush}"
-                          Stroke="{StaticResource AccentBrush}" StrokeThickness="1.7"
-                          StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
-                </Border>
-            </Grid>
+            <StackPanel Margin="26,22,26,18">
+                <TextBlock Text="Configurações" FontFamily="{StaticResource DisplayFont}"
+                           FontSize="22" FontWeight="SemiBold" />
+                <TextBlock Text="Conexões SSH, sessões e comportamento do aplicativo."
+                           FontSize="12.5" Foreground="{StaticResource TextDimBrush}" Margin="0,5,0,0" />
+            </StackPanel>
         </Border>
 
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
@@ -136,9 +122,15 @@
                         <TextBlock Text="Tenta 1s, 2s, 4s, 8s e 16s; reavalia LAN/externo a cada tentativa."
                                    FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Margin="25,4,0,14" />
 
+                        <CheckBox x:Name="PersistentSessionCheck" Style="{StaticResource DarkCheckBox}"
+                                  Content="Sessão persistente no servidor (tmux)" />
+                        <TextBlock Text="Mantém o trabalho no servidor quando o notebook suspende ou a conexão cai; o app reata ao reconectar."
+                                   FontSize="10.5" Foreground="{StaticResource TextMutedBrush}"
+                                   TextWrapping="Wrap" Margin="25,4,0,14" />
+
                         <CheckBox x:Name="ConfirmCloseCheck" Style="{StaticResource DarkCheckBox}"
                                   Content="Pedir confirmação ao fechar um terminal conectado" />
-                        <TextBlock Text="Ctrl+Shift+W abre a confirmação; o ✕ do painel segue a mesma regra."
+                        <TextBlock Text="Ctrl+Shift+Q ou Ctrl+Shift+W abrem a confirmação; o ✕ do painel segue a mesma regra."
                                    FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Margin="25,4,0,14" />
 
                         <CheckBox x:Name="KeepAwakeCheck" Style="{StaticResource DarkCheckBox}"
@@ -211,8 +203,8 @@
                 BorderThickness="0,1,0,0">
             <Border.Background>
                 <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-                    <GradientStop Color="#070A0D" Offset="0" />
-                    <GradientStop Color="#050607" Offset="1" />
+                    <GradientStop Color="#111111" Offset="0" />
+                    <GradientStop Color="#0A0A0A" Offset="1" />
                 </LinearGradientBrush>
             </Border.Background>
             <Grid Margin="26,12">
@@ -228,5 +220,7 @@
         </Border>
     </Grid>
 </Window>
+
+
 
 

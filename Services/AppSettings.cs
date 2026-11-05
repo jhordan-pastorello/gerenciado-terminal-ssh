@@ -39,6 +39,7 @@ public sealed class AppSettings
 
     public bool AutoReconnect { get; set; } = true;
     public bool KeepAwake { get; set; } = true;
+    public bool PersistentSession { get; set; } = true;
     public bool StartWithWindows { get; set; }
     public bool StartMinimized { get; set; } = true;
     public bool ConfirmClose { get; set; } = true;

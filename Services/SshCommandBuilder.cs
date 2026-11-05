@@ -6,6 +6,7 @@ namespace StorageTerm.Services;
 public static class SshCommandBuilder
 {
     private static readonly Regex SafeAlias = new(@"^[A-Za-z0-9._@:\-]+$", RegexOptions.Compiled);
+    private static readonly Regex SafeSession = new(@"^[A-Za-z0-9_-]+$", RegexOptions.Compiled);
 
     public static string SshPath
     {
@@ -22,9 +23,10 @@ public static class SshCommandBuilder
 
     /// <summary>
     /// Monta a linha de comando do ssh usando o ~/.ssh/config. O alias é validado
-    /// porque a linha é passada ao CreateProcess como texto.
+    /// porque a linha é passada ao CreateProcess como texto. Se tmuxSession for
+    /// informado, o ssh abre/reatar uma sessão tmux persistente no servidor.
     /// </summary>
-    public static string Build(string alias)
+    public static string Build(string alias, string? tmuxSession = null)
     {
         var clean = alias.Trim();
         if (!IsValidAlias(clean))
@@ -32,10 +34,25 @@ public static class SshCommandBuilder
             throw new ArgumentException($"Alias SSH inválido: '{alias}'. Use letras, números, ponto, hífen, dois-pontos ou @.", nameof(alias));
         }
 
-        return $"\"{SshPath}\" -o ConnectTimeout=8 -o ServerAliveInterval=30 " +
-               $"-o ServerAliveCountMax=3 -o TCPKeepAlive=yes {clean}";
+        if (tmuxSession != null && !SafeSession.IsMatch(tmuxSession))
+        {
+            throw new ArgumentException($"Sessão tmux inválida: '{tmuxSession}'.", nameof(tmuxSession));
+        }
+
+        var tty = tmuxSession != null ? "-t " : string.Empty;
+        var command = $"\"{SshPath}\" {tty}-o ConnectTimeout=8 -o ServerAliveInterval=30 " +
+                      $"-o ServerAliveCountMax=3 -o TCPKeepAlive=yes {clean}";
+
+        if (tmuxSession != null)
+        {
+            command += $" \"tmux start-server \\; set -s extended-keys off \\; set -g status off \\; set -g pane-border-style fg=#2A2A2A \\; set -g pane-active-border-style fg=#6E6E6E \\; new-session -A -s {tmuxSession} || exec bash -l\"";
+        }
+
+        return command;
     }
 
     public static string BuildDemo() => "cmd.exe /k";
 }
+
+
 

@@ -1,4 +1,5 @@
-﻿using System.Runtime.InteropServices;
+﻿using System.Text;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -26,13 +27,22 @@ public partial class MainWindow : Window
     private const int HotkeyCopy = 1005;
     private const int HotkeyPaste = 1006;
     private const int HotkeyMaximize = 1007;
-    private const int HotkeyCloseAlt = 1008;
+    private const int HotkeyCloseQ = 1008;
     private const int HotkeyPaneBase = 1100;
 
-    private const uint ModAlt = 0x0001;
     private const uint ModControl = 0x0002;
     private const uint ModShift = 0x0004;
     private const uint ModNoRepeat = 0x4000;
+
+    private const int WhKeyboardLl = 13;
+    private const int WmKeyDown = 0x0100;
+    private const int WmSysKeyDown = 0x0104;
+    private const int VkShift = 0x10;
+    private const int VkControl = 0x11;
+    private const int VkMenu = 0x12;
+    private const int WmPowerBroadcast = 0x0218;
+    private const int PbtApmResumeAutomatic = 0x0012;
+    private const int PbtApmResumeSuspend = 0x0007;
 
     private AppSettings _settings;
     private readonly StartupOptions _startup;
@@ -53,18 +63,21 @@ public partial class MainWindow : Window
     private bool _updateCheckInFlight;
     private bool _applyingUpdate;
 
-    private static readonly Brush NeutralPillBg = Frozen("#0C1014");
-    private static readonly Brush NeutralPillBorder = Frozen("#1C2127");
-    private static readonly Brush LanPillBg = Frozen("#14221F");
-    private static readonly Brush LanPillBorder = Frozen("#2E4C46");
-    private static readonly Brush ExtPillBg = Frozen("#221D12");
-    private static readonly Brush ExtPillBorder = Frozen("#4A3D22");
-    private static readonly Brush DemoPillBg = Frozen("#1A1724");
-    private static readonly Brush DemoPillBorder = Frozen("#3A344A");
+    private static readonly Brush NeutralPillBg = Frozen("#111111");
+    private static readonly Brush NeutralPillBorder = Frozen("#2A2A2A");
+    private static readonly Brush LanPillBg = Frozen("#1A1A1A");
+    private static readonly Brush LanPillBorder = Frozen("#3A3A3A");
+    private static readonly Brush ExtPillBg = Frozen("#161616");
+    private static readonly Brush ExtPillBorder = Frozen("#333333");
+    private static readonly Brush DemoPillBg = Frozen("#181818");
+    private static readonly Brush DemoPillBorder = Frozen("#383838");
 
     private TrayIconService? _tray;
     private HwndSource? _hwndSource;
     private IntPtr _hwnd;
+    private LowLevelKeyboardProc? _keyboardProc;
+    private IntPtr _keyboardHook;
+    private bool _resumeInProgress;
     private TerminalPane? _active;
     private bool _shuttingDown;
     private bool _hotkeysRegistered;
@@ -217,6 +230,7 @@ public partial class MainWindow : Window
         ConnectionTarget target;
         string command;
         SshProfile? profile = null;
+        var sessionSlot = 0;
 
         if (demo)
         {
@@ -232,9 +246,12 @@ public partial class MainWindow : Window
                 return null;
             }
 
+            sessionSlot = AllocateSessionSlot();
+            var tmuxSession = _settings.PersistentSession ? $"storage-{sessionSlot}" : null;
+
             try
             {
-                command = SshCommandBuilder.Build(target.Alias);
+                command = SshCommandBuilder.Build(target.Alias, tmuxSession);
             }
             catch (Exception ex)
             {
@@ -244,14 +261,15 @@ public partial class MainWindow : Window
             }
 
             profile = SshConfigReader.Resolve(target.Alias);
-            Log.Info($"Perfil SSH {target.Alias}: {profile.Summary} · chave {profile.IdentityName}");
+            Log.Info($"Perfil SSH {target.Alias}: {profile.Summary} · chave {profile.IdentityName}" +
+                     (tmuxSession != null ? $" · tmux {tmuxSession}" : ""));
             if (!profile.Found)
             {
                 ShowToast($"Alias '{target.Alias}' não encontrado em ~/.ssh/config.", error: true);
             }
         }
 
-        var pane = new TerminalPane();
+        var pane = new TerminalPane { SessionSlot = sessionSlot };
         try
         {
             pane.Initialize(command, target.Alias, target.Mode, overrideMode, demo, _settings, profile);
@@ -288,6 +306,16 @@ public partial class MainWindow : Window
         pane.Exited += (_, _) => _ = HandlePaneExitedAsync(pane);
         pane.Notification += (_, message) => ShowToast(message);
         pane.ModeChangeRequested += (_, mode) => _ = ChangePaneModeAsync(pane, mode);
+    }
+
+    private int AllocateSessionSlot()
+    {
+        for (var slot = 1; slot <= AppSettings.MaxTerminals; slot++)
+        {
+            if (_panes.All(p => p.SessionSlot != slot)) return slot;
+        }
+
+        return 1;
     }
 
     private void LayoutPanes()
@@ -439,9 +467,13 @@ public partial class MainWindow : Window
                 target = _resolver.Resolve(_settings, pane.ModeOverride);
             }
 
+            var tmuxSession = !pane.IsDemo && _settings.PersistentSession && pane.SessionSlot > 0
+                ? $"storage-{pane.SessionSlot}"
+                : null;
+
             var command = pane.IsDemo
                 ? SshCommandBuilder.BuildDemo()
-                : SshCommandBuilder.Build(target.Alias);
+                : SshCommandBuilder.Build(target.Alias, tmuxSession);
 
             SshProfile? profile = null;
             if (!pane.IsDemo)
@@ -751,8 +783,8 @@ public partial class MainWindow : Window
         ToastText.Text = message;
         ToastText.Foreground = (Brush)FindResource(error ? "RedBrush" : "TextBrush");
         ToastDot.Fill = (Brush)FindResource(error ? "RedBrush" : "AccentBrush");
-        ToastBadge.Background = error ? Frozen("#1E1214") : Frozen("#0B1115");
-        ToastBadge.BorderBrush = error ? Frozen("#4A2026") : Frozen("#2A3835");
+        ToastBadge.Background = error ? Frozen("#211616") : Frozen("#161616");
+        ToastBadge.BorderBrush = error ? Frozen("#3E2A2A") : Frozen("#2A2A2A");
 
         ToastBadge.BeginAnimation(UIElement.OpacityProperty, null);
         ToastBadge.Opacity = 1;
@@ -1234,7 +1266,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (ctrl && !shift && !alt && e.Key == Key.Q)
+        if (ctrl && shift && !alt && e.Key == Key.Q)
         {
             e.Handled = true;
             CloseActivePane();
@@ -1248,7 +1280,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (alt && !ctrl && !shift && e.Key is >= Key.D1 and <= Key.D6)
+        if (ctrl && shift && !alt && e.Key is >= Key.D1 and <= Key.D6)
         {
             e.Handled = true;
             FocusPane(e.Key - Key.D1);
@@ -1316,14 +1348,29 @@ public partial class MainWindow : Window
         Register(HotkeyCopy, ModControl | ModShift, Key.C);
         Register(HotkeyPaste, ModControl | ModShift, Key.V);
         Register(HotkeyMaximize, 0, Key.F11);
-        Register(HotkeyCloseAlt, ModControl, Key.Q);
+        Register(HotkeyCloseQ, ModControl | ModShift, Key.Q);
 
         for (var i = 0; i < AppSettings.MaxTerminals; i++)
         {
-            Register(HotkeyPaneBase + i, ModAlt, (Key)((int)Key.D1 + i));
+            Register(HotkeyPaneBase + i, ModControl | ModShift, (Key)((int)Key.D1 + i));
         }
 
         _hotkeysRegistered = true;
+
+        // Hook só para AltGr: compõe o caractere e envia direto ao PTY.
+        if (_keyboardHook == IntPtr.Zero)
+        {
+            _keyboardProc ??= KeyboardHookProc;
+            _keyboardHook = SetWindowsHookEx(WhKeyboardLl, _keyboardProc, GetModuleHandle(null), 0);
+            if (_keyboardHook == IntPtr.Zero)
+            {
+                Log.Warn($"Falha ao instalar o hook de AltGr: {Marshal.GetLastWin32Error()}");
+            }
+            else
+            {
+                Log.Info("Hook de AltGr instalado.");
+            }
+        }
 
         if (failures.Count > 0)
         {
@@ -1351,7 +1398,13 @@ public partial class MainWindow : Window
         UnregisterHotKey(_hwnd, HotkeyCopy);
         UnregisterHotKey(_hwnd, HotkeyPaste);
         UnregisterHotKey(_hwnd, HotkeyMaximize);
-        UnregisterHotKey(_hwnd, HotkeyCloseAlt);
+        UnregisterHotKey(_hwnd, HotkeyCloseQ);
+
+        if (_keyboardHook != IntPtr.Zero)
+        {
+            UnhookWindowsHookEx(_keyboardHook);
+            _keyboardHook = IntPtr.Zero;
+        }
 
         for (var i = 0; i < AppSettings.MaxTerminals; i++)
         {
@@ -1368,8 +1421,95 @@ public partial class MainWindow : Window
             handled = true;
             HandleHotkey(wParam.ToInt32());
         }
+        else if (msg == WmPowerBroadcast)
+        {
+            var powerEvent = wParam.ToInt32();
+            if (powerEvent is PbtApmResumeAutomatic or PbtApmResumeSuspend)
+            {
+                handled = true;
+                _ = OnSystemResumedAsync();
+            }
+        }
 
         return IntPtr.Zero;
+    }
+
+    private IntPtr KeyboardHookProc(int nCode, IntPtr wParam, IntPtr lParam)
+    {
+        if (nCode >= 0 &&
+            (wParam == (IntPtr)WmKeyDown || wParam == (IntPtr)WmSysKeyDown) &&
+            _active != null &&
+            GetForegroundWindow() == _hwnd)
+        {
+            var info = Marshal.PtrToStructure<KbdLlHookStruct>(lParam);
+            var ctrl = (GetAsyncKeyState(VkControl) & 0x8000) != 0;
+            var alt = (info.flags & 0x20) != 0 || // LLKHF_ALTDOWN
+                      (GetAsyncKeyState(0xA5) & 0x8000) != 0 || // right Alt (AltGr)
+                      (GetAsyncKeyState(VkMenu) & 0x8000) != 0;
+            var shift = (GetAsyncKeyState(VkShift) & 0x8000) != 0;
+
+            // AltGr = Ctrl+Alt. Compõe o caractere com o layout ABNT2 e envia
+            // direto ao PTY, evitando sequências CSI do controle/tmux.
+            if (ctrl && alt && !IsModifierKey(info.vkCode))
+            {
+                var layout = GetKeyboardLayout(0);
+                var scan = info.scanCode != 0
+                    ? info.scanCode
+                    : MapVirtualKeyEx(info.vkCode, 0, layout);
+
+                var state = new byte[256];
+                state[VkControl] = 0x80;
+                state[VkMenu] = 0x80;
+                if (shift) state[VkShift] = 0x80;
+
+                var buffer = new StringBuilder(8);
+                var count = ToUnicodeEx(info.vkCode, scan, state, buffer, 8, 0, layout);
+                if (count > 0)
+                {
+                    var text = buffer.ToString();
+                    if (text.Length > 0 && text.Any(c => !char.IsControl(c)))
+                    {
+                        _ = Dispatcher.BeginInvoke(
+                            DispatcherPriority.Input,
+                            new Action(() => _active?.SendText(text)));
+                        return (IntPtr)1;
+                    }
+                }
+            }
+        }
+
+        return CallNextHookEx(_keyboardHook, nCode, wParam, lParam);
+    }
+
+    private static bool IsModifierKey(uint vk) => vk is
+        0x10 or 0x11 or 0x12 or // Shift, Ctrl, Alt
+        0xA0 or 0xA1 or 0xA2 or 0xA3 or 0xA4 or 0xA5 or // left/right modifiers
+        0x5B or 0x5C; // Win
+    private async Task OnSystemResumedAsync()
+    {
+        if (_shuttingDown || _resumeInProgress) return;
+
+        _resumeInProgress = true;
+        try
+        {
+            Log.Info("Sistema retomado; aguardando a rede e reconectando as sessões.");
+            await Task.Delay(TimeSpan.FromSeconds(3));
+
+            if (_shuttingDown) return;
+            ShowToast("Sistema retomado — revalidando sessões…");
+
+            foreach (var pane in _panes.ToArray())
+            {
+                if (pane.IsClosed) continue;
+
+                CancelReconnect(pane);
+                await ReconnectPaneAsync(pane, manual: true);
+            }
+        }
+        finally
+        {
+            _resumeInProgress = false;
+        }
     }
 
     private void HandleHotkey(int id)
@@ -1380,9 +1520,6 @@ public partial class MainWindow : Window
                 _ = AddPaneAsync(null);
                 break;
             case HotkeyClose:
-                CloseActivePane();
-                break;
-            case HotkeyCloseAlt:
                 CloseActivePane();
                 break;
             case HotkeyNext:
@@ -1399,6 +1536,9 @@ public partial class MainWindow : Window
                 break;
             case HotkeyMaximize:
                 ToggleMaximize();
+                break;
+            case HotkeyCloseQ:
+                CloseActivePane();
                 break;
             default:
                 if (id >= HotkeyPaneBase && id < HotkeyPaneBase + AppSettings.MaxTerminals)
@@ -1512,6 +1652,45 @@ public partial class MainWindow : Window
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    private struct KbdLlHookStruct
+    {
+        public uint vkCode;
+        public uint scanCode;
+        public uint flags;
+        public uint time;
+        public UIntPtr dwExtraInfo;
+    }
+
+    private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc lpfn, IntPtr hMod, uint dwThreadId);
+
+    [DllImport("user32.dll")]
+    private static extern bool UnhookWindowsHookEx(IntPtr hhk);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int vKey);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetKeyboardLayout(uint idThread);
+
+    [DllImport("user32.dll")]
+    private static extern uint MapVirtualKeyEx(uint code, uint mapType, IntPtr layout);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int ToUnicodeEx(
+        uint vk, uint scan, byte[] state, StringBuilder buffer, int cch, uint flags, IntPtr layout);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr GetModuleHandle(string? lpModuleName);
+    [StructLayout(LayoutKind.Sequential)]
     private struct Point32
     {
         public int X;
@@ -1527,6 +1706,13 @@ public partial class MainWindow : Window
     [DllImport("user32.dll")]
     private static extern bool GetCursorPos(out Point32 point);
 }
+
+
+
+
+
+
+
 
 
 

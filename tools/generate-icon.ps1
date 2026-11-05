@@ -31,13 +31,13 @@ function New-IconBitmap([int]$size) {
 
     # Deep black body with a faint teal vignette.
     $body = New-Object System.Drawing.Drawing2D.PathGradientBrush $shape
-    $body.CenterColor = [System.Drawing.Color]::FromArgb(255, 14, 22, 21)
+    $body.CenterColor = [System.Drawing.Color]::FromArgb(255, 18, 18, 18)
     $body.SurroundColors = [System.Drawing.Color[]]@([System.Drawing.Color]::FromArgb(255, 3, 4, 5))
     $body.CenterPoint = New-Object System.Drawing.PointF 92, 82
     $g.FillPath($body, $shape)
 
     # Pane mosaic hint (the app's 2x2 tiling).
-    $panePen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(18, 143, 184, 176)), 2
+    $panePen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(14, 210, 210, 210)), 2
     $panes = @(
         @(42, 42, 94, 94),
         @(146, 42, 94, 94),
@@ -69,37 +69,32 @@ function New-IconBitmap([int]$size) {
     $textPath.AddString(">_", $family, [int][System.Drawing.FontStyle]::Bold, 138,
         (New-Object System.Drawing.RectangleF 8, 22, 240, 205), $format)
 
-    $glowOuter = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(16, 143, 184, 176)), 18
+    $glowOuter = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(10, 230, 230, 230)), 18
     $glowOuter.LineJoin = [System.Drawing.Drawing2D.LineJoin]::Round
     $g.DrawPath($glowOuter, $textPath)
 
-    $glowInner = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(35, 170, 207, 201)), 8
+    $glowInner = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(22, 245, 245, 245)), 8
     $glowInner.LineJoin = [System.Drawing.Drawing2D.LineJoin]::Round
     $g.DrawPath($glowInner, $textPath)
 
     $textBrush = New-Object System.Drawing.Drawing2D.LinearGradientBrush (
         (New-Object System.Drawing.RectangleF 30, 50, 200, 160)),
-        ([System.Drawing.Color]::FromArgb(255, 195, 225, 220)),
-        ([System.Drawing.Color]::FromArgb(255, 111, 154, 147)),
+        ([System.Drawing.Color]::FromArgb(255, 245, 245, 245)),
+        ([System.Drawing.Color]::FromArgb(255, 135, 135, 135)),
         45.0
     $g.FillPath($textBrush, $textPath)
 
-    $edgePen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(50, 220, 235, 232)), 1.2
+    $edgePen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(40, 255, 255, 255)), 1.2
     $g.DrawPath($edgePen, $textPath)
 
     # Border gradient.
     $borderBrush = New-Object System.Drawing.Drawing2D.LinearGradientBrush $rect,
-        ([System.Drawing.Color]::FromArgb(255, 62, 91, 86)),
-        ([System.Drawing.Color]::FromArgb(255, 10, 15, 18)),
+        ([System.Drawing.Color]::FromArgb(255, 70, 70, 70)),
+        ([System.Drawing.Color]::FromArgb(255, 15, 15, 15)),
         45.0
     $borderPen = New-Object System.Drawing.Pen $borderBrush, 3
     $g.DrawPath($borderPen, $shape)
 
-    # Small online indicator.
-    $dotGlow = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(28, 111, 191, 155))
-    $g.FillEllipse($dotGlow, 184, 34, 40, 40)
-    $dot = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 111, 191, 155))
-    $g.FillEllipse($dot, 196, 46, 16, 16)
 
     $g.Dispose()
     return $bmp
@@ -145,4 +140,5 @@ $bw.Flush(); $bw.Dispose(); $fs.Dispose()
 
 Get-Item $icoPath | Select-Object FullName, Length
 Write-Output ("preview=" + (Join-Path $env:TEMP "StorageTerm-preview.png"))
+
 

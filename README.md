@@ -1,10 +1,10 @@
-# StorageTerm
+﻿# StorageTerm
 
 Gerenciador de terminais SSH para Windows, feito para alternar entre **`storage-lan`** (rede local) e **`storage`** (Tailscale/externo) sem trocar de janela, perder sessão ou estourar a tela com abas.
 
 ## Destaques
 
-- **Interface compacta**: barra de 50 px, botões pequenos e ações secundárias no menu **⋯**; mais área para o terminal.
+- **Interface minimalista**: barra de 44 px, sem logo na barra, tema **grafite monocromático** (sem verde) e ações secundárias no menu **⋯**; mais área para o terminal.
 - **Auto-update**: a versão instalada baixa releases novas do GitHub, confere o SHA-256 e aplica sozinha ao sair (ou em **⋯ → Atualizar agora**).
 - **1 a 6 terminais**, sempre começando com **um**. `Ctrl+T` abre o próximo e o mosaico se reorganiza sozinho.
 - **Abre direto no SSH**: o primeiro painel já executa `ssh storage-lan` ou `ssh storage`; shell local só no modo `--demo`.
@@ -104,12 +104,14 @@ Os apps instalados passam a ver a `v1.0.1` e se atualizam sozinhos. A tag precis
 |---|---|
 | `Ctrl+T` | Novo terminal (até 6) |
 | `Ctrl+Shift+W` | Fechar o terminal ativo (com confirmação, se configurado) |
-| `Ctrl+Q` | Fechar o terminal ativo (mesma confirmação) |
-| `Alt+1` … `Alt+6` | Focar o terminal N |
+| `Ctrl+Shift+Q` | Fechar o terminal ativo (alternativa) |
+| `Ctrl+Shift+1` … `Ctrl+Shift+6` | Focar o terminal N |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Próximo / anterior |
 | `Ctrl+Shift+C` | Copiar a seleção |
 | `Ctrl+Shift+V` | Colar |
 | `F11` | Maximizar / restaurar |
+
+`AltGr` (Ctrl+Alt) **nunca é capturado**: o app compõe o caractere com o layout ABNT2 e envia direto ao PTY, então `/`, `?`, `°`, `!`, `@`, `#` funcionam inclusive dentro do tmux. Para fechar o painel use `Ctrl+Shift+Q` ou `Ctrl+Shift+W`, sem Alt.
 
 Os atalhos são registrados como *hotkeys* enquanto a janela está ativa. Isso faz `Ctrl+T` funcionar mesmo com o terminal nativo focado (dentro do SSH), sem enviar o atalho para o servidor.
 
@@ -173,13 +175,25 @@ O comando continua sendo `ssh <alias>`, então o OpenSSH resolve `HostName`, `Us
 
 - O processo principal do app é o "daemon": ele é dono dos PTYs/ConPTY e dos processos `ssh`.
 - Fechar a janela (**X**) esconde para a bandeja e **mantém as sessões**.
-- **`Ctrl+Q`** (ou **`Ctrl+Shift+W`**) fecha **o terminal ativo**. Se for o último, o app continua aberto (tela vazia + bandeja); use **Sair** no menu do ícone para encerrar o app e os SSH.
+- **`Ctrl+Shift+Q`** (ou **`Ctrl+Shift+W`**) fecha **o terminal ativo**. Se for o último, o app continua aberto (tela vazia + bandeja); use **Sair** no menu do ícone para encerrar o app e os SSH.
 - **Sair** no menu do ícone da bandeja encerra os SSH e o app.
 - Iniciar com o Windows usa `--tray`: a janela abre oculta e já cria a primeira sessão.
 - Uma segunda execução do `.exe` apenas mostra a janela da instância existente.
-- Com **Manter o PC acordado** ligado, o app chama `SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)` enquanto houver sessões. Isso impede a **suspensão por inatividade**; não impede um **Desligar/Suspender** escolhido explicitamente.
-- Se o Windows for suspenso, hibernado, desligado ou o usuário fizer logoff, nenhum processo sobrevive. Ao voltar, o **autostart** recria a sessão e a **reconexão automática** restabelece a conexão (reavaliando LAN × externo).
+- Com **Manter o PC acordado** ligado, o app chama `SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)` enquanto houver sessões. Isso impede a **suspensão por inatividade**; não impede fechar a tampa nem um **Suspender** explícito.
+- Se o Windows suspender, a conexão TCP cai — mas com a **sessão persistente (tmux)** o trabalho continua rodando no servidor. Ao acordar, o app recebe o evento de retorno, reata a sessão e você continua de onde parou.
 - Após 5 tentativas rápidas sem sucesso, a reconexão pausa e o painel mostra **desconectado**. Clique em **↻** para recomeçar.
+
+### Sessão persistente (tmux)
+
+Por padrão, cada painel abre/reatar uma sessão `tmux` no servidor (`storage-1`, `storage-2`, …):
+
+- suspender o notebook, perder a rede, fechar o painel ou reiniciar o app **não encerra o trabalho** no servidor;
+- ao reconectar/acordar, o app usa `tmux new-session -A` e volta para a mesma sessão;
+- o retorno da suspensão (`WM_POWERBROADCAST`) dispara uma reconexão automática após alguns segundos;
+- a barra de status do tmux fica oculta e as bordas em cinza, mantendo o visual limpo e monocromático;
+- se o servidor não tiver tmux, o comando cai para um shell bash normal.
+
+A opção fica em **Configurações → Sessões → Sessão persistente no servidor (tmux)** (ligada por padrão). O tmux já está instalado no seu servidor.
 
 ## Configurações
 
@@ -189,6 +203,7 @@ Abra pelo botão **⋯** no canto superior direito → **Configurações** (ou p
 - **Aliases SSH**: padrão `storage-lan` e `storage`.
 - **Host/porta de teste da LAN**: padrão `192.168.1.30:22`.
 - **Reconectar automaticamente** quando a conexão cair.
+- **Sessão persistente no servidor (tmux)** — mantém o trabalho através de suspensão/quedas.
 - **Pedir confirmação** ao fechar um terminal conectado.
 - **Manter o PC acordado** enquanto houver sessões.
 - **Iniciar com o Windows** (Run do usuário) e **iniciar minimizado**.
@@ -239,6 +254,12 @@ A solução `StorageTerm.slnx` inclui o app e os testes (34 testes de layout e v
 
 ## Solução de problemas
 
+**AltGr / ABNT2 (`/`, `?`, `°`, `!`, `@`) não digitam**
+Atualize para a versão **1.0.2+**. Ela usa o modo de entrada de texto do Windows Terminal e um hook de AltGr que compõe o caractere e o envia direto ao PTY; `Ctrl+Alt+Q/W/E` voltam a produzir `/`, `?`, `°` inclusive no tmux. Para fechar o painel use `Ctrl+Shift+Q` ou `Ctrl+Shift+W`.
+
+**Suspender o notebook derruba o SSH**
+A conexão TCP não sobrevive à suspensão. Ative **Sessão persistente (tmux)** (padrão): o trabalho continua no servidor e o app reata ao acordar. Sem tmux, o shell é recriado e o que estava rodando se perde.
+
 **O SSH pede senha**
 A chave `id_ed25519` não está autorizada no servidor. O prompt aparece dentro do próprio terminal; o app não guarda senha. Corrija o `authorized_keys` no servidor.
 
@@ -278,3 +299,4 @@ O executável não é assinado. Use "Mais informações → Executar assim mesmo
 - StorageTerm: MIT (veja `LICENSE`).
 - WPF-UI.Terminal: MIT.
 - `CI.Microsoft.Terminal.Wpf`, `Microsoft.Windows.Console.ConPTY` e Windows Terminal: componentes Microsoft/MIT.
+

@@ -11,18 +11,18 @@ namespace StorageTerm.Controls;
 
 public partial class TerminalPane : UserControl, IDisposable
 {
-    private static readonly Brush AccentBorder = Frozen("#8FB8B0");
-    private static readonly Brush IdleBorder = Frozen("#1A2026");
-    private static readonly Brush HeaderIdle = Frozen("#0A0D10");
-    private static readonly Brush HeaderActive = Frozen("#10161A");
-    private static readonly Brush TextPrimary = Frozen("#E9EDF0");
-    private static readonly Brush HostInactive = Frozen("#A7B4C0");
-    private static readonly Brush TextDim = Frozen("#8A949E");
-    private static readonly Brush TextMuted = Frozen("#5C6670");
-    private static readonly Brush Green = Frozen("#6FBF9B");
-    private static readonly Brush Amber = Frozen("#C9A45C");
-    private static readonly Brush Red = Frozen("#D97A86");
-    private static readonly Brush Purple = Frozen("#A79BC6");
+    private static readonly Brush AccentBorder = Frozen("#9A9A9A");
+    private static readonly Brush IdleBorder = Frozen("#242424");
+    private static readonly Brush HeaderIdle = Frozen("#111111");
+    private static readonly Brush HeaderActive = Frozen("#1A1A1A");
+    private static readonly Brush TextPrimary = Frozen("#EDEDED");
+    private static readonly Brush HostInactive = Frozen("#A3A3A3");
+    private static readonly Brush TextDim = Frozen("#A3A3A3");
+    private static readonly Brush TextMuted = Frozen("#6E6E6E");
+    private static readonly Brush Green = Frozen("#C7C7C7");
+    private static readonly Brush Amber = Frozen("#8F8F8F");
+    private static readonly Brush Red = Frozen("#D18B8B");
+    private static readonly Brush Purple = Frozen("#B0B0B0");
 
     private MenuItem? _menuAuto;
     private MenuItem? _menuLan;
@@ -39,6 +39,7 @@ public partial class TerminalPane : UserControl, IDisposable
 
     public Guid Id { get; } = Guid.NewGuid();
     public int Index { get; private set; }
+    public int SessionSlot { get; set; }
     public string Alias { get; private set; } = "storage";
     public string ConnectionLabel { get; private set; } = "storage";
     public ConnectionMode ResolvedMode { get; private set; } = ConnectionMode.External;
@@ -72,7 +73,7 @@ public partial class TerminalPane : UserControl, IDisposable
     {
         Term.StartupCommandLine = command;
         Term.WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        Term.Win32InputMode = true;
+        Term.Win32InputMode = false;
         Term.LogConPTYOutput = false;
 
         _profile = profile;
@@ -131,24 +132,24 @@ public partial class TerminalPane : UserControl, IDisposable
             ModeText.Text = "DEMO";
             ModeText.Foreground = Purple;
             ModeDot.Fill = Purple;
-            ModeBadge.Background = Frozen("#1A1724");
-            ModeBadge.BorderBrush = Frozen("#3A344A");
+            ModeBadge.Background = Frozen("#181818");
+            ModeBadge.BorderBrush = Frozen("#383838");
         }
         else if (resolvedMode == ConnectionMode.Lan)
         {
             ModeText.Text = "LAN";
             ModeText.Foreground = Green;
             ModeDot.Fill = Green;
-            ModeBadge.Background = Frozen("#14221F");
-            ModeBadge.BorderBrush = Frozen("#2E4C46");
+            ModeBadge.Background = Frozen("#1A1A1A");
+            ModeBadge.BorderBrush = Frozen("#3A3A3A");
         }
         else
         {
             ModeText.Text = "EXT";
             ModeText.Foreground = Amber;
             ModeDot.Fill = Amber;
-            ModeBadge.Background = Frozen("#221D12");
-            ModeBadge.BorderBrush = Frozen("#4A3D22");
+            ModeBadge.Background = Frozen("#161616");
+            ModeBadge.BorderBrush = Frozen("#333333");
         }
 
         ModeBadge.ToolTip = BuildIdentityHelp();
@@ -553,5 +554,6 @@ public partial class TerminalPane : UserControl, IDisposable
         return brush;
     }
 }
+
 
 

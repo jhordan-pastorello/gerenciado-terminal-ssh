@@ -42,6 +42,7 @@ public partial class SettingsWindow : Window
         ProbePortBox.Text = _source.LanProbePort.ToString(CultureInfo.InvariantCulture);
 
         AutoReconnectCheck.IsChecked = _source.AutoReconnect;
+        PersistentSessionCheck.IsChecked = _source.PersistentSession;
         ConfirmCloseCheck.IsChecked = _source.ConfirmClose;
         KeepAwakeCheck.IsChecked = _source.KeepAwake;
         StartWithWindowsCheck.IsChecked = _source.StartWithWindows;
@@ -102,6 +103,7 @@ public partial class SettingsWindow : Window
             : 0;
 
         settings.AutoReconnect = AutoReconnectCheck.IsChecked == true;
+        settings.PersistentSession = PersistentSessionCheck.IsChecked == true;
         settings.ConfirmClose = ConfirmCloseCheck.IsChecked == true;
         settings.KeepAwake = KeepAwakeCheck.IsChecked == true;
         settings.StartWithWindows = StartWithWindowsCheck.IsChecked == true;

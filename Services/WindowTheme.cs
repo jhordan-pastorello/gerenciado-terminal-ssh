@@ -16,13 +16,13 @@ public static class WindowTheme
             var dark = 1;
             _ = DwmSetWindowAttribute(hwnd, 20, ref dark, sizeof(int));
 
-            var caption = 0x0018100A; // #0A1018 (COLORREF)
+            var caption = 0x000A0A0A; // #0A0A0A (COLORREF)
             _ = DwmSetWindowAttribute(hwnd, 35, ref caption, sizeof(int));
 
-            var text = 0x00F2E7DC; // #DCE7F2
+            var text = 0x00EDEDED; // #EDEDED
             _ = DwmSetWindowAttribute(hwnd, 36, ref text, sizeof(int));
 
-            var border = 0x0033261B; // #1B2633
+            var border = 0x002A2A2A; // #2A2A2A
             _ = DwmSetWindowAttribute(hwnd, 34, ref border, sizeof(int));
 
             var corner = 2;
@@ -37,3 +37,5 @@ public static class WindowTheme
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 }
+
+

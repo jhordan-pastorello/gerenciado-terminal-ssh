@@ -20,8 +20,8 @@
         </Grid.RowDefinitions>
 
         <StackPanel Grid.Row="0" Orientation="Horizontal">
-            <Border Width="32" Height="32" CornerRadius="9" Background="#2A1317"
-                    BorderBrush="#4A2026" BorderThickness="1" VerticalAlignment="Top">
+            <Border Width="32" Height="32" CornerRadius="9" Background="#211616"
+                    BorderBrush="#3E2A2A" BorderThickness="1" VerticalAlignment="Top">
                 <TextBlock Text="!" FontSize="16" FontWeight="Bold" Foreground="{StaticResource RedBrush}"
                            HorizontalAlignment="Center" VerticalAlignment="Center" />
             </Border>
@@ -45,5 +45,6 @@
         </StackPanel>
     </Grid>
 </Window>
+
 
 

@@ -34,9 +34,9 @@ public static class TerminalThemeFactory
 
     public static TerminalTheme Create() => new()
     {
-        DefaultBackground = Ref(0x05, 0x06, 0x07),
-        DefaultForeground = Ref(0xE6, 0xED, 0xF3),
-        DefaultSelectionBackground = Ref(0x24, 0x36, 0x34),
+        DefaultBackground = Ref(0x0A, 0x0A, 0x0A),
+        DefaultForeground = Ref(0xE5, 0xE5, 0xE5),
+        DefaultSelectionBackground = Ref(0x2A, 0x2A, 0x2A),
         CursorStyle = CursorStyle.BlinkingUnderline,
         ColorTable = new[]
         {
@@ -62,3 +62,4 @@ public static class TerminalThemeFactory
     /// <summary>Win32 COLORREF: 0x00BBGGRR.</summary>
     private static uint Ref(byte r, byte g, byte b) => (uint)(r | (g << 8) | (b << 16));
 }
+
