@@ -1,0 +1,557 @@
+﻿using System.Runtime.InteropServices;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Threading;
+using StorageTerm.Models;
+using StorageTerm.Services;
+
+namespace StorageTerm.Controls;
+
+public partial class TerminalPane : UserControl, IDisposable
+{
+    private static readonly Brush AccentBorder = Frozen("#8FB8B0");
+    private static readonly Brush IdleBorder = Frozen("#1A2026");
+    private static readonly Brush HeaderIdle = Frozen("#0A0D10");
+    private static readonly Brush HeaderActive = Frozen("#10161A");
+    private static readonly Brush TextPrimary = Frozen("#E9EDF0");
+    private static readonly Brush HostInactive = Frozen("#A7B4C0");
+    private static readonly Brush TextDim = Frozen("#8A949E");
+    private static readonly Brush TextMuted = Frozen("#5C6670");
+    private static readonly Brush Green = Frozen("#6FBF9B");
+    private static readonly Brush Amber = Frozen("#C9A45C");
+    private static readonly Brush Red = Frozen("#D97A86");
+    private static readonly Brush Purple = Frozen("#A79BC6");
+
+    private MenuItem? _menuAuto;
+    private MenuItem? _menuLan;
+    private MenuItem? _menuExternal;
+    private SshProfile? _profile;
+    private bool _disposed;
+
+    public event EventHandler? Activated;
+    public event EventHandler? CloseRequested;
+    public event EventHandler? ReconnectRequested;
+    public event EventHandler<ConnectionMode?>? ModeChangeRequested;
+    public event EventHandler? Exited;
+    public event EventHandler<string>? Notification;
+
+    public Guid Id { get; } = Guid.NewGuid();
+    public int Index { get; private set; }
+    public string Alias { get; private set; } = "storage";
+    public string ConnectionLabel { get; private set; } = "storage";
+    public ConnectionMode ResolvedMode { get; private set; } = ConnectionMode.External;
+    public ConnectionMode? ModeOverride { get; set; }
+    public PaneStatus Status { get; private set; } = PaneStatus.Connecting;
+    public bool IsDemo { get; private set; }
+    public bool IsExitHandled { get; private set; }
+    public DateTime StartedAt { get; private set; } = DateTime.UtcNow;
+    public DateTime? ConnectedAt { get; private set; }
+    public int ReconnectAttempts { get; set; }
+    public bool IsClosed => _disposed;
+
+    public TerminalPane()
+    {
+        InitializeComponent();
+        Header.ContextMenu = BuildContextMenu();
+        Term.Terminal.GotFocus += (_, _) => Activated?.Invoke(this, EventArgs.Empty);
+        Term.Terminal.PreviewMouseDown += (_, _) => Activated?.Invoke(this, EventArgs.Empty);
+        ApplyAppearance("Consolas", 13);
+        SetStatus(PaneStatus.Connecting, "iniciando…");
+    }
+
+    public void Initialize(
+        string command,
+        string alias,
+        ConnectionMode resolvedMode,
+        ConnectionMode? modeOverride,
+        bool demo,
+        AppSettings settings,
+        SshProfile? profile = null)
+    {
+        Term.StartupCommandLine = command;
+        Term.WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        Term.Win32InputMode = true;
+        Term.LogConPTYOutput = false;
+
+        _profile = profile;
+        ApplyAppearance(settings.FontFamily, settings.FontSize);
+        ApplyIdentity(alias, resolvedMode, modeOverride, demo);
+
+        StartedAt = DateTime.UtcNow;
+        ConnectedAt = null;
+        IsExitHandled = false;
+        SetStatus(PaneStatus.Connecting, "iniciando…");
+    }
+
+    public void RestartWith(
+        string command,
+        string alias,
+        ConnectionMode resolvedMode,
+        ConnectionMode? modeOverride,
+        bool demo,
+        SshProfile? profile = null)
+    {
+        if (_disposed) return;
+
+        IsExitHandled = false;
+        ConnectedAt = null;
+        StartedAt = DateTime.UtcNow;
+        Term.StartupCommandLine = command;
+        _profile = profile;
+        ApplyIdentity(alias, resolvedMode, modeOverride, demo);
+        SetStatus(PaneStatus.Connecting, "reconectando…");
+
+        try
+        {
+            Term.ConPTYTerm?.ClearUITerminal(false);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Falha ao limpar o terminal: {ex.Message}");
+        }
+
+        _ = Term.RestartTerm(null!, true);
+    }
+
+    public void ApplyIdentity(string alias, ConnectionMode resolvedMode, ConnectionMode? modeOverride, bool demo)
+    {
+        Alias = alias;
+        ResolvedMode = resolvedMode;
+        ModeOverride = modeOverride;
+        IsDemo = demo;
+
+        HostText.Text = demo ? "shell local" : alias;
+        HostText.ToolTip = demo ? "Modo demonstração (shell local)" : BuildIdentityHelp();
+        ConnectionLabel = demo ? "demo" : _profile is { Found: true } p ? p.UserAtAlias : alias;
+
+        if (demo)
+        {
+            ModeText.Text = "DEMO";
+            ModeText.Foreground = Purple;
+            ModeDot.Fill = Purple;
+            ModeBadge.Background = Frozen("#1A1724");
+            ModeBadge.BorderBrush = Frozen("#3A344A");
+        }
+        else if (resolvedMode == ConnectionMode.Lan)
+        {
+            ModeText.Text = "LAN";
+            ModeText.Foreground = Green;
+            ModeDot.Fill = Green;
+            ModeBadge.Background = Frozen("#14221F");
+            ModeBadge.BorderBrush = Frozen("#2E4C46");
+        }
+        else
+        {
+            ModeText.Text = "EXT";
+            ModeText.Foreground = Amber;
+            ModeDot.Fill = Amber;
+            ModeBadge.Background = Frozen("#221D12");
+            ModeBadge.BorderBrush = Frozen("#4A3D22");
+        }
+
+        ModeBadge.ToolTip = BuildIdentityHelp();
+    }
+
+    public void SetIndex(int index)
+    {
+        Index = index;
+        IndexText.Text = $"#{index}";
+    }
+
+    public void SetActive(bool active)
+    {
+        PaneBorder.BorderBrush = active ? AccentBorder : IdleBorder;
+        Header.Background = active ? HeaderActive : HeaderIdle;
+        ActiveBar.Background = active ? AccentBorder : Brushes.Transparent;
+        HostText.Foreground = active ? TextPrimary : HostInactive;
+        IndexText.Foreground = active ? AccentBorder : TextMuted;
+    }
+
+    public void PollProcess()
+    {
+        if (_disposed || IsExitHandled) return;
+
+        var term = Term.ConPTYTerm;
+        if (term == null) return;
+
+        bool started;
+        try { started = term.TermProcIsStarted; }
+        catch { return; }
+
+        if (!started) return;
+
+        if (HasExited(term))
+        {
+            IsExitHandled = true;
+            ConnectedAt = null;
+            SetStatus(PaneStatus.Disconnected, "desconectado");
+            Exited?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
+        if (Status == PaneStatus.Connecting &&
+            DateTime.UtcNow - StartedAt > TimeSpan.FromMilliseconds(1200))
+        {
+            ConnectedAt = DateTime.UtcNow;
+            SetStatus(PaneStatus.Connected, "conectado");
+        }
+    }
+
+    public void SetStatus(PaneStatus status, string? detail = null)
+    {
+        Status = status;
+        StatusText.Text = detail ?? status switch
+        {
+            PaneStatus.Connecting => "conectando…",
+            PaneStatus.Connected => "conectado",
+            PaneStatus.Reconnecting => "reconectando…",
+            PaneStatus.Disconnected => "desconectado",
+            _ => "encerrado"
+        };
+
+        (StatusDot.Fill, StatusText.Foreground) = status switch
+        {
+            PaneStatus.Connected => (Green, TextDim),
+            PaneStatus.Connecting => (Amber, TextDim),
+            PaneStatus.Reconnecting => (Amber, Amber),
+            PaneStatus.Disconnected => (Red, Red),
+            _ => (TextMuted, TextMuted)
+        };
+
+        var connected = status == PaneStatus.Connected;
+        StatusText.Visibility = connected ? Visibility.Collapsed : Visibility.Visible;
+        ReconnectButton.Visibility = connected ? Visibility.Collapsed : Visibility.Visible;
+        StatusDot.ToolTip = StatusText.Text;
+
+        StatusText.ToolTip = status switch
+        {
+            PaneStatus.Disconnected when IsDemo => "O shell local terminou. Use ↻ para reiniciar.",
+            PaneStatus.Disconnected => "A conexão SSH terminou. Use ↻ para reconectar.",
+            PaneStatus.Reconnecting => "Aguardando a próxima tentativa automática.",
+            _ => null
+        };
+    }
+
+    public void SetReconnectCountdown(int seconds)
+    {
+        SetStatus(PaneStatus.Reconnecting, $"em {Math.Max(0, seconds)}s…");
+    }
+
+    public void FocusTerminal()
+    {
+        _ = Dispatcher.BeginInvoke(DispatcherPriority.Input, () =>
+        {
+            try
+            {
+                Term.Terminal.Focus();
+                Keyboard.Focus(Term.Terminal);
+
+                if (PresentationSource.FromVisual(Term.Terminal) == null) return;
+
+                var topLeft = Term.Terminal.PointToScreen(new Point(0, 0));
+                var bottomRight = Term.Terminal.PointToScreen(
+                    new Point(Term.Terminal.ActualWidth, Term.Terminal.ActualHeight));
+
+                var center = new NativePoint
+                {
+                    X = (int)((topLeft.X + bottomRight.X) / 2),
+                    Y = (int)((topLeft.Y + bottomRight.Y) / 2)
+                };
+
+                // O terminal é um HWND nativo (HwndHost). O foco WPF sozinho não
+                // entrega o teclado ao ConPTY; precisamos focar o filho nativo.
+                var native = WindowFromPoint(center);
+                if (native != IntPtr.Zero)
+                {
+                    SetFocus(native);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"Falha ao focar terminal: {ex.Message}");
+            }
+        });
+    }
+
+    public void ApplyAppearance(string fontFamily, double fontSize)
+    {
+        var resolved = TerminalThemeFactory.ResolveFontFamily(fontFamily);
+        var rounded = (short)Math.Clamp(Math.Round(fontSize), 9, 24);
+
+        Term.FontFamilyWhenSettingTheme = new FontFamily(resolved);
+        Term.FontSizeWhenSettingTheme = rounded;
+
+        if (PresentationSource.FromVisual(Term.Terminal) != null)
+        {
+            Term.Terminal.SetTheme(TerminalThemeFactory.Create(), resolved, rounded);
+        }
+        else
+        {
+            Term.Theme = TerminalThemeFactory.Create();
+        }
+    }
+
+    public string GetSelectedText()
+    {
+        try { return Term.Terminal.GetSelectedText() ?? string.Empty; }
+        catch { return string.Empty; }
+    }
+
+    public bool SendText(string text)
+    {
+        var term = Term.ConPTYTerm;
+        if (term == null) return false;
+
+        var normalized = text.Replace("\r\n", "\r").Replace('\n', '\r');
+        try
+        {
+            term.WriteToTerm(normalized.AsSpan());
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Falha ao enviar texto para o terminal: {ex.Message}");
+            return false;
+        }
+    }
+
+    public void CopySelection()
+    {
+        var text = GetSelectedText();
+        if (string.IsNullOrEmpty(text))
+        {
+            Notification?.Invoke(this, "Nenhum texto selecionado — arraste com o mouse para selecionar.");
+            return;
+        }
+
+        try
+        {
+            System.Windows.Clipboard.SetText(text);
+            Notification?.Invoke(this, "Seleção copiada.");
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Falha ao copiar: {ex.Message}");
+            Notification?.Invoke(this, "Não foi possível copiar para a área de transferência.");
+        }
+    }
+
+    public void PasteClipboard()
+    {
+        try
+        {
+            if (!System.Windows.Clipboard.ContainsText())
+            {
+                Notification?.Invoke(this, "A área de transferência não contém texto.");
+                return;
+            }
+
+            if (SendText(System.Windows.Clipboard.GetText()))
+            {
+                Notification?.Invoke(this, "Texto colado.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Falha ao colar: {ex.Message}");
+            Notification?.Invoke(this, "Não foi possível ler a área de transferência.");
+        }
+    }
+
+    public void WriteSystemMessage(string message, bool error = false)
+    {
+        var term = Term.ConPTYTerm;
+        if (term == null) return;
+
+        var color = error ? "\u001b[38;2;248;113;113m" : "\u001b[38;2;126;143;163m";
+        try
+        {
+            term.WriteToUITerminal($"\r\n{color}[StorageTerm] {message}\u001b[0m\r\n".AsSpan());
+        }
+        catch
+        {
+            // The process may already be gone.
+        }
+    }
+
+    public void ClearScreen()
+    {
+        try { Term.ConPTYTerm?.ClearUITerminal(false); }
+        catch { }
+    }
+
+    private string BuildIdentityHelp()
+    {
+        if (IsDemo)
+        {
+            return "Modo demonstração (shell local)";
+        }
+
+        if (_profile is { Found: true } profile)
+        {
+            return $"{profile.UserAtAlias} · {profile.Endpoint} · {profile.IdentityName}";
+        }
+
+        var mode = ModeOverride switch
+        {
+            ConnectionMode.Lan => "LAN forçada",
+            ConnectionMode.External => "externo forçado",
+            _ => "automático"
+        };
+
+        return $"{Alias} · perfil não encontrado em ~/.ssh/config · {mode}";
+    }
+
+    private static bool HasExited(Wpf.Ui.Terminal.TermPTY term)
+    {
+        try
+        {
+            var process = term.Process;
+            return process != null && process.HasExited;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private ContextMenu BuildContextMenu()
+    {
+        var menu = new ContextMenu();
+
+        var reconnect = new MenuItem { Header = "Reconectar agora" };
+        reconnect.Click += (_, _) => ReconnectRequested?.Invoke(this, EventArgs.Empty);
+
+        var auto = new MenuItem { Header = "Conexão automática", IsCheckable = true };
+        auto.Click += (_, _) => ModeChangeRequested?.Invoke(this, null);
+
+        var lan = new MenuItem { Header = "Forçar LAN (storage-lan)", IsCheckable = true };
+        lan.Click += (_, _) => ModeChangeRequested?.Invoke(this, ConnectionMode.Lan);
+
+        var external = new MenuItem { Header = "Forçar externo (storage)", IsCheckable = true };
+        external.Click += (_, _) => ModeChangeRequested?.Invoke(this, ConnectionMode.External);
+
+        var copy = new MenuItem { Header = "Copiar seleção", InputGestureText = "Ctrl+Shift+C" };
+        copy.Click += (_, _) => CopySelection();
+
+        var paste = new MenuItem { Header = "Colar", InputGestureText = "Ctrl+Shift+V" };
+        paste.Click += (_, _) => PasteClipboard();
+
+        var clear = new MenuItem { Header = "Limpar tela (visual)" };
+        clear.Click += (_, _) => ClearScreen();
+
+        var close = new MenuItem { Header = "Fechar terminal", InputGestureText = "Ctrl+Shift+W" };
+        close.Click += (_, _) => CloseRequested?.Invoke(this, EventArgs.Empty);
+
+        menu.Items.Add(reconnect);
+        menu.Items.Add(new Separator());
+        menu.Items.Add(auto);
+        menu.Items.Add(lan);
+        menu.Items.Add(external);
+        menu.Items.Add(new Separator());
+        menu.Items.Add(copy);
+        menu.Items.Add(paste);
+        menu.Items.Add(clear);
+        menu.Items.Add(new Separator());
+        menu.Items.Add(close);
+
+        menu.Opened += (_, _) =>
+        {
+            auto.IsChecked = ModeOverride is null;
+            lan.IsChecked = ModeOverride == ConnectionMode.Lan;
+            external.IsChecked = ModeOverride == ConnectionMode.External;
+            auto.IsEnabled = lan.IsEnabled = external.IsEnabled = !IsDemo;
+        };
+
+        _menuAuto = auto;
+        _menuLan = lan;
+        _menuExternal = external;
+        return menu;
+    }
+
+    private void PaneBorder_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e) =>
+        Activated?.Invoke(this, EventArgs.Empty);
+
+    private void Header_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        Activated?.Invoke(this, EventArgs.Empty);
+
+        if (!IsInsideButton(e.OriginalSource as DependencyObject))
+        {
+            FocusTerminal();
+        }
+    }
+
+    private static bool IsInsideButton(DependencyObject? source)
+    {
+        while (source != null)
+        {
+            if (source is Button) return true;
+            source = VisualTreeHelper.GetParent(source);
+        }
+
+        return false;
+    }
+
+    private void Header_MouseRightButtonDown(object sender, MouseButtonEventArgs e) =>
+        Activated?.Invoke(this, EventArgs.Empty);
+
+    private void ModeBadge_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+        Activated?.Invoke(this, EventArgs.Empty);
+
+        if (Header.ContextMenu is { } menu)
+        {
+            menu.PlacementTarget = ModeBadge;
+            menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+            menu.IsOpen = true;
+        }
+    }
+
+    private void Reconnect_Click(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        ReconnectRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void Close_Click(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        CloseRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+
+        try { Term.Dispose(); }
+        catch (Exception ex) { Log.Warn($"Falha ao descartar terminal: {ex.Message}"); }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint
+    {
+        public int X;
+        public int Y;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr WindowFromPoint(NativePoint point);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SetFocus(IntPtr hWnd);
+
+    private static Brush Frozen(string hex)
+    {
+        var color = (Color)ColorConverter.ConvertFromString(hex);
+        var brush = new SolidColorBrush(color);
+        brush.Freeze();
+        return brush;
+    }
+}
+
+

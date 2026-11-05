@@ -1,0 +1,1532 @@
+﻿using System.Runtime.InteropServices;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Interop;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Threading;
+using StorageTerm.Controls;
+using StorageTerm.Dialogs;
+using StorageTerm.Layout;
+using StorageTerm.Models;
+using StorageTerm.Services;
+
+namespace StorageTerm;
+
+public partial class MainWindow : Window
+{
+    private const int WmHotkey = 0x0312;
+    private const int WmLeftButtonDown = 0x0201;
+
+    private const int HotkeyNew = 1001;
+    private const int HotkeyClose = 1002;
+    private const int HotkeyNext = 1003;
+    private const int HotkeyPrevious = 1004;
+    private const int HotkeyCopy = 1005;
+    private const int HotkeyPaste = 1006;
+    private const int HotkeyMaximize = 1007;
+    private const int HotkeyCloseAlt = 1008;
+    private const int HotkeyPaneBase = 1100;
+
+    private const uint ModAlt = 0x0001;
+    private const uint ModControl = 0x0002;
+    private const uint ModShift = 0x0004;
+    private const uint ModNoRepeat = 0x4000;
+
+    private AppSettings _settings;
+    private readonly StartupOptions _startup;
+    private readonly bool _demo;
+    private readonly ConnectionResolver _resolver = new();
+    private readonly SleepGuard _sleepGuard = new();
+    private readonly List<TerminalPane> _panes = new();
+    private readonly Dictionary<Guid, CancellationTokenSource> _reconnectCts = new();
+
+    private readonly DispatcherTimer _pollTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+    private readonly DispatcherTimer _connectivityTimer = new() { Interval = TimeSpan.FromSeconds(30) };
+    private readonly DispatcherTimer _toastTimer = new() { Interval = TimeSpan.FromSeconds(3.5) };
+    private readonly DispatcherTimer _updateTimer = new() { Interval = TimeSpan.FromHours(6) };
+    private readonly UpdateService _updateService = new();
+
+    private UpdateInfo? _pendingUpdate;
+    private string? _pendingUpdateZip;
+    private bool _updateCheckInFlight;
+    private bool _applyingUpdate;
+
+    private static readonly Brush NeutralPillBg = Frozen("#0C1014");
+    private static readonly Brush NeutralPillBorder = Frozen("#1C2127");
+    private static readonly Brush LanPillBg = Frozen("#14221F");
+    private static readonly Brush LanPillBorder = Frozen("#2E4C46");
+    private static readonly Brush ExtPillBg = Frozen("#221D12");
+    private static readonly Brush ExtPillBorder = Frozen("#4A3D22");
+    private static readonly Brush DemoPillBg = Frozen("#1A1724");
+    private static readonly Brush DemoPillBorder = Frozen("#3A344A");
+
+    private TrayIconService? _tray;
+    private HwndSource? _hwndSource;
+    private IntPtr _hwnd;
+    private TerminalPane? _active;
+    private bool _shuttingDown;
+    private bool _hotkeysRegistered;
+    private bool _probeInFlight;
+    private bool _balloonShown;
+    private bool _startupComplete;
+
+    public MainWindow(AppSettings settings, StartupOptions startup)
+    {
+        _settings = settings;
+        _startup = startup;
+        _demo = startup.Demo;
+
+        InitializeComponent();
+
+        _pollTimer.Tick += (_, _) => PollPanes();
+        _connectivityTimer.Tick += (_, _) => _ = RefreshConnectivityAsync(silent: true);
+        _toastTimer.Tick += (_, _) =>
+        {
+            _toastTimer.Stop();
+            FadeToast();
+        };
+
+        Loaded += MainWindow_Loaded;
+        Closing += MainWindow_Closing;
+        Activated += (_, _) => RegisterHotkeys();
+        Deactivated += (_, _) => UnregisterHotkeys();
+        PreviewKeyDown += OnPreviewKeyDown;
+        ComponentDispatcher.ThreadPreprocessMessage += OnThreadMessage;
+
+        if (_startup.StartInTray)
+        {
+            Opacity = 0;
+        }
+    }
+
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+
+        _hwnd = new WindowInteropHelper(this).Handle;
+        _hwndSource = HwndSource.FromHwnd(_hwnd);
+        _hwndSource?.AddHook(WndProc);
+
+        WindowTheme.Apply(this);
+        var dpi = VisualTreeHelper.GetDpi(this);
+        Log.Info($"DPI escala={dpi.DpiScaleX} workArea={SystemParameters.WorkArea} primary={SystemParameters.PrimaryScreenWidth}x{SystemParameters.PrimaryScreenHeight}");
+        RestoreWindowPlacement();
+    }
+
+    private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            SyncAutoStartSetting();
+            InitializeTray();
+
+            await StartSessionsAsync();
+
+            _pollTimer.Start();
+            _connectivityTimer.Start();
+            _updateTimer.Tick += (_, _) => _ = CheckForUpdatesAsync(manual: false);
+            _updateTimer.Start();
+            _ = InitialUpdateCheckAsync();
+            _startupComplete = true;
+            UpdateChrome();
+
+            if (_startup.StartInTray && _settings.StartMinimized)
+            {
+                await Task.Delay(900);
+                Hide();
+                Opacity = 1;
+                _tray?.ShowBalloon("StorageTerm está na bandeja. As sessões SSH continuam ativas.");
+            }
+            else
+            {
+                Opacity = 1;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Falha na inicialização da janela.", ex);
+            Opacity = 1;
+            System.Windows.MessageBox.Show(
+                this,
+                "Não foi possível iniciar o StorageTerm.\n\n" + ex.Message +
+                "\n\nDetalhes em:\n" + AppPaths.LogFile,
+                "StorageTerm",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+    }
+
+    private async Task StartSessionsAsync()
+    {
+        var requested = Math.Clamp(_startup.RequestedPanes, 1, AppSettings.MaxTerminals);
+
+        if (_demo)
+        {
+            EmptyTitle.Text = "Modo demonstração";
+            EmptySubtitle.Text = "Abrindo shells locais para testar o layout.";
+
+            for (var i = 0; i < requested; i++)
+            {
+                await AddPaneAsync(null, demo: true, focus: i == requested - 1);
+            }
+
+            return;
+        }
+
+        EmptyTitle.Text = "Detectando conexão…";
+        EmptySubtitle.Text =
+            $"Testando storage-lan em {_settings.LanProbeHost}:{_settings.LanProbePort} (LAN). " +
+            "Se não responder, uso o perfil storage (Tailscale).";
+
+        var probe = await _resolver.ProbeAsync(_settings);
+        Log.Info($"Sonda inicial LAN {_settings.LanProbeHost}:{_settings.LanProbePort} => " +
+                 $"{(probe.LanReachable ? "ok" : "sem resposta")} ({probe.LatencyMs} ms)");
+
+        var alias = probe.LanReachable ? _settings.LanAlias : _settings.ExternalAlias;
+        var profile = SshConfigReader.Resolve(alias);
+        Log.Info($"Identificação SSH {alias}: {profile.Summary} · chave {profile.IdentityName} · alias encontrado={profile.Found}");
+
+        EmptySubtitle.Text = !profile.Found
+            ? $"Alias {alias} não encontrado em ~/.ssh/config. Verifique as configurações."
+            : probe.LanReachable
+                ? $"LAN disponível ({probe.LatencyMs} ms) — conectando como {profile.UserAtAlias} em {profile.Endpoint}…"
+                : $"LAN indisponível — conectando como {profile.UserAtAlias} via Tailscale…";
+
+        UpdateChrome();
+
+        for (var i = 0; i < requested; i++)
+        {
+            await AddPaneAsync(null, demo: false, focus: i == requested - 1);
+        }
+    }
+
+    private async Task<TerminalPane?> AddPaneAsync(ConnectionMode? overrideMode, bool demo = false, bool focus = true)
+    {
+        if (_shuttingDown) return null;
+
+        demo = demo || _demo;
+
+        if (_panes.Count >= AppSettings.MaxTerminals)
+        {
+            ShowToast("Limite de 6 terminais atingido. Feche um terminal para abrir outro.", error: true);
+            return null;
+        }
+
+        ConnectionTarget target;
+        string command;
+        SshProfile? profile = null;
+
+        if (demo)
+        {
+            target = _resolver.Demo();
+            command = SshCommandBuilder.BuildDemo();
+        }
+        else
+        {
+            target = _resolver.Resolve(_settings, overrideMode);
+            if (!SshCommandBuilder.IsValidAlias(target.Alias))
+            {
+                ShowToast($"Alias SSH inválido: '{target.Alias}'. Abra as configurações.", error: true);
+                return null;
+            }
+
+            try
+            {
+                command = SshCommandBuilder.Build(target.Alias);
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Falha ao montar o comando SSH.", ex);
+                ShowToast(ex.Message, error: true);
+                return null;
+            }
+
+            profile = SshConfigReader.Resolve(target.Alias);
+            Log.Info($"Perfil SSH {target.Alias}: {profile.Summary} · chave {profile.IdentityName}");
+            if (!profile.Found)
+            {
+                ShowToast($"Alias '{target.Alias}' não encontrado em ~/.ssh/config.", error: true);
+            }
+        }
+
+        var pane = new TerminalPane();
+        try
+        {
+            pane.Initialize(command, target.Alias, target.Mode, overrideMode, demo, _settings, profile);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Falha ao inicializar o terminal.", ex);
+            pane.Dispose();
+            ShowToast("Falha ao iniciar o terminal. Veja o log.", error: true);
+            return null;
+        }
+
+        WirePane(pane);
+        _panes.Add(pane);
+        PaneHost.Children.Insert(0, pane);
+        LayoutPanes();
+        UpdateChrome();
+
+        if (focus) SetActivePane(pane, focus: true);
+
+        var label = demo ? "shell local" : target.Alias;
+        ShowToast($"Terminal {pane.Index} · {label} · {ModeLabel(target)}");
+        Log.Info($"Terminal {pane.Index} criado: {command}");
+
+        await Task.CompletedTask;
+        return pane;
+    }
+
+    private void WirePane(TerminalPane pane)
+    {
+        pane.Activated += (_, _) => SetActivePane(pane, focus: false);
+        pane.ReconnectRequested += (_, _) => _ = ReconnectPaneAsync(pane, manual: true);
+        pane.CloseRequested += (_, _) => _ = ClosePaneAsync(pane);
+        pane.Exited += (_, _) => _ = HandlePaneExitedAsync(pane);
+        pane.Notification += (_, message) => ShowToast(message);
+        pane.ModeChangeRequested += (_, mode) => _ = ChangePaneModeAsync(pane, mode);
+    }
+
+    private void LayoutPanes()
+    {
+        var tiles = LayoutEngine.Compute(_panes.Count);
+
+        for (var i = 0; i < _panes.Count; i++)
+        {
+            var pane = _panes[i];
+            var tile = tiles[i];
+
+            Grid.SetRow(pane, tile.Row);
+            Grid.SetColumn(pane, tile.Column);
+            Grid.SetRowSpan(pane, tile.RowSpan);
+            Grid.SetColumnSpan(pane, tile.ColumnSpan);
+            pane.Margin = new Thickness(2);
+            pane.SetIndex(i + 1);
+            pane.SetActive(pane == _active);
+        }
+
+        EmptyState.Visibility = _panes.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (_panes.Count == 0) EmptyActionButton.IsEnabled = true;
+    }
+
+    private void SetActivePane(TerminalPane? pane, bool focus)
+    {
+        if (pane != null && !_panes.Contains(pane)) pane = null;
+        _active = pane ?? _panes.LastOrDefault();
+
+        foreach (var item in _panes)
+        {
+            item.SetActive(item == _active);
+        }
+
+        UpdateTitle();
+        if (focus) _active?.FocusTerminal();
+    }
+
+    private void UpdateTitle()
+    {
+        Title = _active is { } pane ? $"StorageTerm — {pane.ConnectionLabel}" : "StorageTerm";
+    }
+
+    private void PollPanes()
+    {
+        if (_shuttingDown) return;
+
+        foreach (var pane in _panes.ToArray())
+        {
+            pane.PollProcess();
+        }
+
+        var now = DateTime.UtcNow;
+        foreach (var pane in _panes)
+        {
+            if (pane.Status == PaneStatus.Connected &&
+                pane.ConnectedAt is { } connectedAt &&
+                now - connectedAt > TimeSpan.FromSeconds(15))
+            {
+                pane.ReconnectAttempts = 0;
+            }
+        }
+
+        UpdateChrome();
+    }
+
+    private async Task HandlePaneExitedAsync(TerminalPane pane)
+    {
+        if (_shuttingDown || pane.IsClosed) return;
+
+        pane.WriteSystemMessage("conexão encerrada.", error: true);
+
+        if (!_settings.AutoReconnect)
+        {
+            pane.SetStatus(PaneStatus.Disconnected, "desconectado");
+            ShowToast($"{pane.Alias}: sessão encerrada. Use ↻ para reconectar.", error: true);
+            UpdateChrome();
+            return;
+        }
+
+        if (pane.ReconnectAttempts >= 5)
+        {
+            pane.SetStatus(PaneStatus.Disconnected, "reconexão pausada");
+            ShowToast($"{pane.Alias}: não foi possível reconectar. Use ↻ para tentar novamente.", error: true);
+            UpdateChrome();
+            return;
+        }
+
+        pane.ReconnectAttempts++;
+        var delay = Math.Min(30, 1 << Math.Min(5, pane.ReconnectAttempts - 1));
+
+        CancelReconnect(pane);
+        var cts = new CancellationTokenSource();
+        _reconnectCts[pane.Id] = cts;
+
+        ShowToast($"{pane.Alias} caiu — reconectando em {delay}s (tentativa {pane.ReconnectAttempts}/5).", error: true);
+        Log.Warn($"{pane.Alias} caiu. Reconexão {pane.ReconnectAttempts}/5 em {delay}s.");
+
+        await ScheduleReconnectAsync(pane, delay, cts.Token);
+    }
+
+    private async Task ScheduleReconnectAsync(TerminalPane pane, int delaySeconds, CancellationToken token)
+    {
+        try
+        {
+            for (var remaining = delaySeconds; remaining > 0; remaining--)
+            {
+                if (token.IsCancellationRequested || _shuttingDown || pane.IsClosed) return;
+                pane.SetReconnectCountdown(remaining);
+                await Task.Delay(1000, token);
+            }
+
+            if (token.IsCancellationRequested || _shuttingDown || pane.IsClosed) return;
+
+            _reconnectCts.Remove(pane.Id);
+            await ReconnectPaneAsync(pane, manual: false, token: token);
+        }
+        catch (OperationCanceledException)
+        {
+            // canceled by user action / close
+        }
+    }
+
+    private async Task ReconnectPaneAsync(TerminalPane pane, bool manual, CancellationToken token = default)
+    {
+        if (_shuttingDown || pane.IsClosed) return;
+
+        if (manual)
+        {
+            CancelReconnect(pane);
+            pane.ReconnectAttempts = 0;
+            pane.SetStatus(PaneStatus.Connecting, "reconectando…");
+        }
+
+        try
+        {
+            ConnectionTarget target;
+            if (pane.IsDemo)
+            {
+                target = _resolver.Demo();
+            }
+            else
+            {
+                if (pane.ModeOverride is null && _settings.Mode == ConnectionMode.Auto)
+                {
+                    await _resolver.ProbeAsync(_settings, token);
+                }
+
+                target = _resolver.Resolve(_settings, pane.ModeOverride);
+            }
+
+            var command = pane.IsDemo
+                ? SshCommandBuilder.BuildDemo()
+                : SshCommandBuilder.Build(target.Alias);
+
+            SshProfile? profile = null;
+            if (!pane.IsDemo)
+            {
+                profile = SshConfigReader.Resolve(target.Alias);
+                if (!profile.Found)
+                {
+                    ShowToast($"Alias '{target.Alias}' não encontrado em ~/.ssh/config.", error: true);
+                }
+            }
+
+            Log.Info($"Terminal {pane.Index} reconectando via {target.Alias} ({ModeLabel(target)}).");
+            pane.RestartWith(command, target.Alias, target.Mode, pane.ModeOverride, pane.IsDemo, profile);
+            pane.WriteSystemMessage($"reconectando via {target.Alias}…");
+            UpdateChrome();
+        }
+        catch (OperationCanceledException)
+        {
+            // canceled
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Falha ao reconectar o terminal.", ex);
+            pane.SetStatus(PaneStatus.Disconnected, "falha ao reconectar");
+            ShowToast($"Falha ao reconectar {pane.Alias}: {ex.Message}", error: true);
+        }
+    }
+
+    private async Task ChangePaneModeAsync(TerminalPane pane, ConnectionMode? mode)
+    {
+        if (pane.IsClosed) return;
+        if (pane.IsDemo)
+        {
+            ShowToast("Este terminal está em modo demonstração.");
+            return;
+        }
+
+        pane.ModeOverride = mode;
+        ShowToast($"{pane.Alias}: modo {ModeLabel(mode)} — reconectando…");
+        await ReconnectPaneAsync(pane, manual: true);
+    }
+
+    private async Task ClosePaneAsync(TerminalPane pane)
+    {
+        if (pane.IsClosed) return;
+
+        if (_settings.ConfirmClose && pane.Status is PaneStatus.Connected or PaneStatus.Connecting)
+        {
+            var dialog = new ConfirmDialog(
+                "Fechar terminal",
+                $"Encerrar a sessão {pane.ConnectionLabel}?",
+                "Encerrar",
+                "Não perguntar novamente")
+            {
+                Owner = this
+            };
+
+            if (dialog.ShowDialog() != true) return;
+
+            if (dialog.DoNotAskAgain)
+            {
+                _settings.ConfirmClose = false;
+                _settings.Save();
+                ShowToast("Confirmação de fechamento desativada nas configurações.");
+            }
+        }
+
+        var index = pane.Index;
+        CancelReconnect(pane);
+        _panes.Remove(pane);
+        PaneHost.Children.Remove(pane);
+        pane.Dispose();
+
+        if (_active == pane) _active = null;
+
+        LayoutPanes();
+        SetActivePane(_active ?? _panes.LastOrDefault(), focus: true);
+        UpdateChrome();
+
+        ShowToast($"Terminal {index} encerrado.");
+        Log.Info($"Terminal {index} encerrado pelo usuário.");
+
+        await Task.CompletedTask;
+    }
+
+    private void CancelReconnect(TerminalPane pane)
+    {
+        if (_reconnectCts.Remove(pane.Id, out var cts))
+        {
+            try { cts.Cancel(); } catch { }
+            cts.Dispose();
+        }
+    }
+
+    private async Task RefreshConnectivityAsync(bool silent)
+    {
+        if (_demo || _probeInFlight || _shuttingDown) return;
+
+        _probeInFlight = true;
+        try
+        {
+            var previous = _resolver.LastProbe?.LanReachable;
+            var probe = await _resolver.ProbeAsync(_settings);
+
+            if (previous != probe.LanReachable)
+            {
+                Log.Info($"LAN {(probe.LanReachable ? "disponível" : "indisponível")} " +
+                         $"({_settings.LanProbeHost}:{_settings.LanProbePort}, {probe.LatencyMs} ms).");
+            }
+
+            UpdateChrome();
+            UpdateFooters();
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Falha na sonda de conectividade: {ex.Message}");
+            if (!silent) ShowToast("Não foi possível testar a conexão.", error: true);
+        }
+        finally
+        {
+            _probeInFlight = false;
+        }
+    }
+
+    private void UpdateChrome()
+    {
+        var count = _panes.Count;
+        var connected = _panes.Count(p => p.Status == PaneStatus.Connected);
+        var reconnecting = _panes.Count(p => p.Status is PaneStatus.Reconnecting or PaneStatus.Connecting);
+        var disconnected = _panes.Count(p => p.Status is PaneStatus.Disconnected or PaneStatus.Stopped);
+
+        CountText.Text = $"{count} / {AppSettings.MaxTerminals}";
+        NewButton.IsEnabled = count < AppSettings.MaxTerminals;
+
+        if (count == 0 && _startupComplete)
+        {
+            EmptyTitle.Text = "Nenhum terminal aberto";
+            EmptySubtitle.Text = "Use Ctrl+T, o botão + ou o menu da bandeja para abrir uma sessão.";
+        }
+
+        if (!_demo)
+        {
+            UpdateModeIndicator();
+        }
+        else
+        {
+            ModeButtonText.Text = "DEMO";
+            ModeDot.Fill = (Brush)FindResource("PurpleBrush");
+            ModeButton.Background = DemoPillBg;
+            ModeButton.BorderBrush = DemoPillBorder;
+        }
+
+        FooterLeft.Text = BuildFooterLeft(count, connected, reconnecting, disconnected);
+        FooterDot.Fill = count == 0
+            ? (Brush)FindResource("TextMutedBrush")
+            : reconnecting > 0
+                ? (Brush)FindResource("AmberBrush")
+                : connected > 0
+                    ? (Brush)FindResource("GreenBrush")
+                    : (Brush)FindResource("RedBrush");
+
+        UpdateFooters();
+        UpdateSleepGuard();
+        UpdateTitle();
+
+        _tray?.UpdateState(
+            count,
+            connected,
+            _settings.KeepAwake,
+            _settings.StartWithWindows,
+            count == 0
+                ? "StorageTerm · nenhum terminal aberto"
+                : $"StorageTerm · {count} terminal(is) · {connected} conectado(s)");
+    }
+
+    private void UpdateModeIndicator()
+    {
+        var probe = _resolver.LastProbe;
+
+        if (_settings.Mode == ConnectionMode.Lan)
+        {
+            ModeButtonText.Text = "LAN forçada";
+            ModeDot.Fill = (Brush)FindResource("GreenBrush");
+            ModeButton.Background = LanPillBg;
+            ModeButton.BorderBrush = LanPillBorder;
+        }
+        else if (_settings.Mode == ConnectionMode.External)
+        {
+            ModeButtonText.Text = "EXTERNO";
+            ModeDot.Fill = (Brush)FindResource("AmberBrush");
+            ModeButton.Background = ExtPillBg;
+            ModeButton.BorderBrush = ExtPillBorder;
+        }
+        else if (probe == null)
+        {
+            ModeButtonText.Text = "AUTO · verificando";
+            ModeDot.Fill = (Brush)FindResource("TextMutedBrush");
+            ModeButton.Background = NeutralPillBg;
+            ModeButton.BorderBrush = NeutralPillBorder;
+        }
+        else if (probe.LanReachable)
+        {
+            ModeButtonText.Text = "AUTO · LAN";
+            ModeDot.Fill = (Brush)FindResource("GreenBrush");
+            ModeButton.Background = LanPillBg;
+            ModeButton.BorderBrush = LanPillBorder;
+        }
+        else
+        {
+            ModeButtonText.Text = "AUTO · EXTERNO";
+            ModeDot.Fill = (Brush)FindResource("AmberBrush");
+            ModeButton.Background = ExtPillBg;
+            ModeButton.BorderBrush = ExtPillBorder;
+        }
+    }
+
+    private void UpdateFooters()
+    {
+        var probe = _resolver.LastProbe;
+        string full;
+        string shortText;
+        Brush dot;
+
+        if (_demo)
+        {
+            full = "DEMO · shell local (sem SSH)";
+            shortText = "DEMO";
+            dot = (Brush)FindResource("PurpleBrush");
+        }
+        else if (_settings.Mode == ConnectionMode.Auto)
+        {
+            if (probe == null)
+            {
+                full = $"AUTO · testando {_settings.LanProbeHost}:{_settings.LanProbePort}…";
+                shortText = "verificando…";
+                dot = (Brush)FindResource("TextMutedBrush");
+            }
+            else if (probe.LanReachable)
+            {
+                full = $"AUTO · LAN {_settings.LanProbeHost}:{_settings.LanProbePort} · {probe.LatencyMs} ms";
+                shortText = $"LAN · {probe.LatencyMs} ms";
+                dot = (Brush)FindResource("GreenBrush");
+            }
+            else
+            {
+                full = $"AUTO · EXTERNO · {_settings.ExternalAlias} (Tailscale)";
+                shortText = "EXTERNO · Tailscale";
+                dot = (Brush)FindResource("AmberBrush");
+            }
+        }
+        else if (_settings.Mode == ConnectionMode.Lan)
+        {
+            full = probe is { LanReachable: false }
+                ? $"LAN forçada · {_settings.LanProbeHost}:{_settings.LanProbePort} · sem resposta"
+                : $"LAN forçada · {_settings.LanProbeHost}:{_settings.LanProbePort}";
+            shortText = "LAN forçada";
+            dot = (Brush)FindResource("GreenBrush");
+        }
+        else
+        {
+            full = $"EXTERNO forçado · {_settings.ExternalAlias} (Tailscale)";
+            shortText = "Externo forçado";
+            dot = (Brush)FindResource("AmberBrush");
+        }
+
+        FooterConnection.Text = shortText;
+        FooterConnection.ToolTip = full;
+        FooterConnectionDot.Fill = dot;
+
+        var awake = _settings.KeepAwake && _panes.Count > 0;
+        FooterAwake.Text = awake ? "PC acordado" : "suspensão normal";
+        FooterAwake.Foreground = awake
+            ? (Brush)FindResource("GreenBrush")
+            : (Brush)FindResource("TextMutedBrush");
+        FooterAwakeIcon.Stroke = awake
+            ? (Brush)FindResource("GreenBrush")
+            : (Brush)FindResource("TextMutedBrush");
+    }
+
+    private void UpdateSleepGuard()
+    {
+        var shouldGuard = _settings.KeepAwake && _panes.Count > 0 && !_shuttingDown;
+        if (_sleepGuard.IsEnabled != shouldGuard)
+        {
+            _sleepGuard.SetEnabled(shouldGuard);
+        }
+    }
+
+    private static string BuildFooterLeft(int count, int connected, int reconnecting, int disconnected)
+    {
+        if (count == 0) return "0 terminais · máximo 6";
+
+        var terminals = count == 1 ? "1 terminal" : $"{count} terminais";
+        var parts = new List<string>(3) { terminals };
+
+        parts.Add(connected == 1 ? "1 conectado" : $"{connected} conectados");
+        if (reconnecting > 0) parts.Add(reconnecting == 1 ? "1 conectando" : $"{reconnecting} conectando");
+        if (disconnected > 0) parts.Add(disconnected == 1 ? "1 desconectado" : $"{disconnected} desconectados");
+
+        return string.Join(" · ", parts);
+    }
+
+    private void ShowToast(string message, bool error = false)
+    {
+        if (_shuttingDown) return;
+
+        ToastText.Text = message;
+        ToastText.Foreground = (Brush)FindResource(error ? "RedBrush" : "TextBrush");
+        ToastDot.Fill = (Brush)FindResource(error ? "RedBrush" : "AccentBrush");
+        ToastBadge.Background = error ? Frozen("#1E1214") : Frozen("#0B1115");
+        ToastBadge.BorderBrush = error ? Frozen("#4A2026") : Frozen("#2A3835");
+
+        ToastBadge.BeginAnimation(UIElement.OpacityProperty, null);
+        ToastBadge.Opacity = 1;
+
+        var transform = ToastBadge.RenderTransform as TranslateTransform ?? new TranslateTransform();
+        ToastBadge.RenderTransform = transform;
+        transform.BeginAnimation(TranslateTransform.YProperty,
+            new DoubleAnimation(-4, 0, TimeSpan.FromMilliseconds(160)));
+
+        _toastTimer.Stop();
+        _toastTimer.Start();
+    }
+
+    private void FadeToast()
+    {
+        var animation = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(320))
+        {
+            FillBehavior = FillBehavior.Stop
+        };
+
+        ToastBadge.BeginAnimation(UIElement.OpacityProperty, animation);
+        ToastBadge.Opacity = 0;
+    }
+
+    private void NewButton_Click(object sender, RoutedEventArgs e) => _ = AddPaneAsync(null);
+
+    private void EmptyAction_Click(object sender, RoutedEventArgs e) => _ = AddPaneAsync(null);
+
+    private async Task ReconnectAllPanesAsync()
+    {
+        foreach (var pane in _panes.ToArray())
+        {
+            await ReconnectPaneAsync(pane, manual: true);
+        }
+
+        ShowToast("Sessões reconectadas.");
+    }
+
+    private void MoreButton_Click(object sender, RoutedEventArgs e)
+    {
+        var menu = new ContextMenu
+        {
+            PlacementTarget = MoreButton,
+            Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom
+        };
+
+        if (_pendingUpdate is { } pending)
+        {
+            var update = new MenuItem { Header = $"Atualizar para v{pending.Version}" };
+            update.Click += (_, _) => ApplyUpdateNow();
+            menu.Items.Add(update);
+            menu.Items.Add(new Separator());
+        }
+
+        var reconnect = new MenuItem
+        {
+            Header = "Reconectar todos",
+            IsEnabled = _panes.Count > 0
+        };
+        reconnect.Click += (_, _) => _ = ReconnectAllPanesAsync();
+
+        var settings = new MenuItem { Header = "Configurações" };
+        settings.Click += (_, _) => OpenSettings();
+
+        var checkUpdates = new MenuItem
+        {
+            Header = "Verificar atualizações",
+            IsEnabled = UpdateService.IsInstalledBuild
+        };
+        checkUpdates.Click += (_, _) => _ = CheckForUpdatesAsync(manual: true);
+
+        var quit = new MenuItem { Header = "Sair" };
+        quit.Click += (_, _) => ExitApp();
+
+        menu.Items.Add(reconnect);
+        menu.Items.Add(settings);
+        menu.Items.Add(new Separator());
+        menu.Items.Add(checkUpdates);
+        menu.Items.Add(new Separator());
+        menu.Items.Add(quit);
+        menu.Items.Add(new Separator());
+        menu.Items.Add(new MenuItem
+        {
+            Header = $"StorageTerm v{UpdateService.VersionLabel}",
+            IsEnabled = false
+        });
+        menu.IsOpen = true;
+    }
+
+    private async Task InitialUpdateCheckAsync()
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(12));
+        }
+        catch
+        {
+            return;
+        }
+
+        await CheckForUpdatesAsync(manual: false);
+    }
+
+    private async Task CheckForUpdatesAsync(bool manual)
+    {
+        if (_shuttingDown) return;
+
+        if (!UpdateService.IsInstalledBuild)
+        {
+            if (manual) ShowToast("Atualizações automáticas estão disponíveis apenas na versão instalada.", error: true);
+            return;
+        }
+
+        if (_updateCheckInFlight)
+        {
+            if (manual) ShowToast("Já existe uma verificação de atualização em andamento.");
+            return;
+        }
+
+        if (_pendingUpdate is { } ready)
+        {
+            if (manual) ShowToast($"A atualização v{ready.Version} já está pronta no menu ⋯.");
+            return;
+        }
+
+        _updateCheckInFlight = true;
+        try
+        {
+            if (manual) ShowToast("Verificando atualizações…");
+
+            var info = await _updateService.CheckAsync();
+            if (info == null)
+            {
+                if (manual) ShowToast($"Você já está na versão mais recente (v{UpdateService.VersionLabel}).");
+                return;
+            }
+
+            ShowToast($"Nova versão v{info.Version} encontrada — baixando…");
+            var zip = await _updateService.DownloadAsync(info);
+            if (zip == null)
+            {
+                ShowToast("Não foi possível baixar a atualização. Veja o log.", error: true);
+                return;
+            }
+
+            _pendingUpdate = info;
+            _pendingUpdateZip = zip;
+            MoreButton.Foreground = (Brush)FindResource("AccentBrush");
+            MoreButton.ToolTip = $"Mais ações · atualização v{info.Version} pronta";
+            ShowToast($"Atualização v{info.Version} pronta — ⋯ → Atualizar agora ou ao sair.");
+            Log.Info($"Updater: atualização {info.Tag} pronta para aplicar.");
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Updater: falha ao verificar/baixar atualização: {ex.Message}");
+            if (manual) ShowToast("Falha ao verificar atualizações. Veja o log.", error: true);
+        }
+        finally
+        {
+            _updateCheckInFlight = false;
+        }
+    }
+
+    private void ApplyUpdateNow()
+    {
+        if (_pendingUpdate is not { } update || string.IsNullOrWhiteSpace(_pendingUpdateZip)) return;
+
+        var active = _panes.Count;
+        var message = active > 0
+            ? $"Atualizar para v{update.Version} agora?\nAs {active} sessões abertas serão encerradas e o app reiniciará."
+            : $"Atualizar para v{update.Version} agora?\nO app reiniciará.";
+
+        var dialog = new ConfirmDialog("Atualizar StorageTerm", message, "Atualizar")
+        {
+            Owner = this
+        };
+
+        if (dialog.ShowDialog() != true) return;
+
+        try
+        {
+            _applyingUpdate = true;
+            _updateService.Apply(_pendingUpdateZip, restart: true);
+            ExitApp();
+        }
+        catch (Exception ex)
+        {
+            _applyingUpdate = false;
+            Log.Error("Updater: falha ao aplicar atualização.", ex);
+            ShowToast("Não foi possível aplicar a atualização.", error: true);
+        }
+    }
+
+    private void ModeButton_Click(object sender, RoutedEventArgs e)
+    {
+        var menu = new ContextMenu { PlacementTarget = ModeButton, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
+
+        AddModeItem(menu, "Automático (detectar LAN)", ConnectionMode.Auto);
+        AddModeItem(menu, $"Sempre LAN ({_settings.LanAlias})", ConnectionMode.Lan);
+        AddModeItem(menu, $"Sempre externo ({_settings.ExternalAlias})", ConnectionMode.External);
+        menu.Items.Add(new Separator());
+
+        var test = new MenuItem { Header = "Testar conexão agora" };
+        test.Click += async (_, _) =>
+        {
+            await RefreshConnectivityAsync(silent: false);
+            var probe = _resolver.LastProbe;
+            ShowToast(probe is { LanReachable: true }
+                ? $"LAN respondeu em {probe.LatencyMs} ms."
+                : $"LAN sem resposta — usando {_settings.ExternalAlias} no modo automático.",
+                error: probe is { LanReachable: false });
+        };
+        menu.Items.Add(test);
+
+        menu.IsOpen = true;
+    }
+
+    private void AddModeItem(ContextMenu menu, string header, ConnectionMode mode)
+    {
+        var item = new MenuItem
+        {
+            Header = header,
+            IsCheckable = true,
+            IsChecked = _settings.Mode == mode
+        };
+
+        item.Click += (_, _) =>
+        {
+            _settings.Mode = mode;
+            _settings.Save();
+            UpdateChrome();
+            _ = RefreshConnectivityAsync(silent: true);
+            ShowToast($"Modo de conexão: {ModeLabel(mode)}. Vale para as próximas sessões.");
+        };
+
+        menu.Items.Add(item);
+    }
+
+    private void OpenSettings()
+    {
+        SaveWindowPlacement();
+
+        var dialog = new SettingsWindow(_settings.Clone(), async probeSettings =>
+        {
+            var temp = new ConnectionResolver();
+            return await temp.ProbeAsync(probeSettings);
+        })
+        {
+            Owner = this
+        };
+
+        if (dialog.ShowDialog() != true || dialog.Result == null) return;
+
+        var updated = dialog.Result;
+        _settings = updated;
+        _settings.Save();
+
+        if (_settings.StartWithWindows && !AutoStart.Set(true))
+        {
+            _settings.StartWithWindows = false;
+            _settings.Save();
+            ShowToast("Não foi possível ativar a inicialização com o Windows.", error: true);
+        }
+        else if (!_settings.StartWithWindows)
+        {
+            AutoStart.Set(false);
+        }
+
+        foreach (var pane in _panes)
+        {
+            pane.ApplyAppearance(_settings.FontFamily, _settings.FontSize);
+        }
+
+        UpdateChrome();
+        _ = RefreshConnectivityAsync(silent: true);
+        ShowToast("Configurações salvas.");
+        Log.Info($"Configurações atualizadas: {_settings}");
+    }
+
+    private void SyncAutoStartSetting()
+    {
+        var actual = AutoStart.IsEnabled;
+        if (actual != _settings.StartWithWindows)
+        {
+            _settings.StartWithWindows = actual;
+            _settings.Save();
+        }
+    }
+
+    private void InitializeTray()
+    {
+        try
+        {
+            _tray = new TrayIconService(
+                showWindow: () => Dispatcher.BeginInvoke(ShowFromExternalRequest),
+                newSession: () => Dispatcher.BeginInvoke(() => _ = AddPaneAsync(null)),
+                newSessionWithMode: mode => Dispatcher.BeginInvoke(() => _ = AddPaneAsync(mode)),
+                openSettings: () => Dispatcher.BeginInvoke(OpenSettings),
+                exit: () => Dispatcher.BeginInvoke(ExitApp),
+                setKeepAwake: enabled =>
+                {
+                    _settings.KeepAwake = enabled;
+                    _settings.Save();
+                    UpdateChrome();
+                    ShowToast(enabled ? "PC será mantido acordado durante as sessões." : "Suspensão normal restaurada.");
+                },
+                setStartWithWindows: enabled =>
+                {
+                    if (enabled && !AutoStart.Set(true))
+                    {
+                        ShowToast("Não foi possível ativar a inicialização com o Windows.", error: true);
+                        return;
+                    }
+
+                    if (!enabled) AutoStart.Set(false);
+
+                    _settings.StartWithWindows = enabled;
+                    _settings.Save();
+                    UpdateChrome();
+                    ShowToast(enabled ? "StorageTerm iniciará com o Windows." : "Inicialização com o Windows desativada.");
+                });
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Falha ao criar o ícone da bandeja.", ex);
+            _tray = null;
+        }
+    }
+
+    public void ShowFromExternalRequest()
+    {
+        if (_shuttingDown) return;
+
+        if (!IsVisible) Show();
+        Opacity = 1;
+
+        if (WindowState == WindowState.Minimized)
+        {
+            WindowState = WindowState.Normal;
+        }
+
+        Activate();
+        Topmost = true;
+        Topmost = false;
+    }
+
+    private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        if (_shuttingDown)
+        {
+            SaveWindowPlacement();
+            return;
+        }
+
+        if (_settings.HideToTrayOnClose)
+        {
+            e.Cancel = true;
+            SaveWindowPlacement();
+            Hide();
+
+            if (!_balloonShown)
+            {
+                _balloonShown = true;
+                _tray?.ShowBalloon(
+                    "O StorageTerm continua na bandeja e mantém as sessões SSH ativas. " +
+                    "Use o menu do ícone para sair de verdade.");
+            }
+        }
+        else
+        {
+            e.Cancel = true;
+            ExitApp();
+        }
+    }
+
+    private void CloseActivePane()
+    {
+        if (_active != null)
+        {
+            _ = ClosePaneAsync(_active);
+        }
+    }
+
+    private void ExitApp()
+    {
+        if (_shuttingDown) return;
+        _shuttingDown = true;
+
+        Log.Info("Encerrando o StorageTerm.");
+        SaveWindowPlacement();
+        _settings.Save();
+
+        _pollTimer.Stop();
+        _connectivityTimer.Stop();
+        _toastTimer.Stop();
+        _updateTimer.Stop();
+
+        UnregisterHotkeys();
+
+        try { _tray?.Dispose(); } catch { }
+        _tray = null;
+
+        _sleepGuard.Dispose();
+
+        foreach (var cts in _reconnectCts.Values)
+        {
+            try { cts.Cancel(); } catch { }
+            cts.Dispose();
+        }
+        _reconnectCts.Clear();
+
+        foreach (var pane in _panes.ToArray())
+        {
+            try { pane.Dispose(); } catch { }
+        }
+        _panes.Clear();
+
+        if (_hwndSource != null)
+        {
+            _hwndSource.RemoveHook(WndProc);
+            _hwndSource = null;
+        }
+
+        ComponentDispatcher.ThreadPreprocessMessage -= OnThreadMessage;
+
+        if (!_applyingUpdate && _pendingUpdateZip != null && UpdateService.IsInstalledBuild)
+        {
+            try
+            {
+                _updateService.Apply(_pendingUpdateZip, restart: false);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"Updater: falha ao agendar a atualização: {ex.Message}");
+            }
+        }
+
+        System.Windows.Application.Current.Shutdown();
+    }
+
+    private void OnPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        var ctrl = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
+        var shift = (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
+        var alt = (Keyboard.Modifiers & ModifierKeys.Alt) != 0;
+
+        if (ctrl && !shift && !alt && e.Key == Key.T)
+        {
+            e.Handled = true;
+            _ = AddPaneAsync(null);
+            return;
+        }
+
+        if (ctrl && shift && !alt && e.Key == Key.W)
+        {
+            e.Handled = true;
+            if (_active != null) _ = ClosePaneAsync(_active);
+            return;
+        }
+
+        if (ctrl && !alt && e.Key == Key.Tab)
+        {
+            e.Handled = true;
+            CyclePane(shift ? -1 : 1);
+            return;
+        }
+
+        if (ctrl && shift && !alt && e.Key == Key.C)
+        {
+            e.Handled = true;
+            _active?.CopySelection();
+            return;
+        }
+
+        if (ctrl && shift && !alt && e.Key == Key.V)
+        {
+            e.Handled = true;
+            _active?.PasteClipboard();
+            return;
+        }
+
+        if (ctrl && !shift && !alt && e.Key == Key.Q)
+        {
+            e.Handled = true;
+            CloseActivePane();
+            return;
+        }
+
+        if (!ctrl && !shift && !alt && e.Key == Key.F11)
+        {
+            e.Handled = true;
+            ToggleMaximize();
+            return;
+        }
+
+        if (alt && !ctrl && !shift && e.Key is >= Key.D1 and <= Key.D6)
+        {
+            e.Handled = true;
+            FocusPane(e.Key - Key.D1);
+        }
+    }
+
+    private void CyclePane(int delta)
+    {
+        if (_panes.Count == 0) return;
+
+        var current = _active == null ? -1 : _panes.IndexOf(_active);
+        var next = (current + delta + _panes.Count) % _panes.Count;
+        SetActivePane(_panes[next], focus: true);
+    }
+
+    private void FocusPane(int index)
+    {
+        if (index >= 0 && index < _panes.Count)
+        {
+            SetActivePane(_panes[index], focus: true);
+        }
+    }
+
+    private void ToggleMaximize()
+    {
+        WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+    }
+
+    private void OnThreadMessage(ref MSG msg, ref bool handled)
+    {
+        if (msg.message != WmLeftButtonDown || _panes.Count == 0 || !IsVisible) return;
+        if (!GetCursorPos(out var point)) return;
+
+        foreach (var pane in _panes)
+        {
+            try
+            {
+                var topLeft = pane.PointToScreen(new System.Windows.Point(0, 0));
+                var bottomRight = pane.PointToScreen(new System.Windows.Point(pane.ActualWidth, pane.ActualHeight));
+
+                if (point.X >= topLeft.X && point.X <= bottomRight.X &&
+                    point.Y >= topLeft.Y && point.Y <= bottomRight.Y)
+                {
+                    SetActivePane(pane, focus: false);
+                    break;
+                }
+            }
+            catch
+            {
+                // The pane may be between layouts.
+            }
+        }
+    }
+
+    private void RegisterHotkeys()
+    {
+        if (_hwnd == IntPtr.Zero || _hotkeysRegistered || _shuttingDown) return;
+
+        var failures = new List<string>();
+
+        Register(HotkeyNew, ModControl, Key.T);
+        Register(HotkeyClose, ModControl | ModShift, Key.W);
+        Register(HotkeyNext, ModControl, Key.Tab);
+        Register(HotkeyPrevious, ModControl | ModShift, Key.Tab);
+        Register(HotkeyCopy, ModControl | ModShift, Key.C);
+        Register(HotkeyPaste, ModControl | ModShift, Key.V);
+        Register(HotkeyMaximize, 0, Key.F11);
+        Register(HotkeyCloseAlt, ModControl, Key.Q);
+
+        for (var i = 0; i < AppSettings.MaxTerminals; i++)
+        {
+            Register(HotkeyPaneBase + i, ModAlt, (Key)((int)Key.D1 + i));
+        }
+
+        _hotkeysRegistered = true;
+
+        if (failures.Count > 0)
+        {
+            Log.Warn("Atalhos globais não registrados: " + string.Join(", ", failures));
+        }
+
+        void Register(int id, uint modifiers, Key key)
+        {
+            var vk = (uint)KeyInterop.VirtualKeyFromKey(key);
+            if (!RegisterHotKey(_hwnd, id, modifiers | ModNoRepeat, vk))
+            {
+                failures.Add($"{modifiers}:{key}");
+            }
+        }
+    }
+
+    private void UnregisterHotkeys()
+    {
+        if (!_hotkeysRegistered || _hwnd == IntPtr.Zero) return;
+
+        UnregisterHotKey(_hwnd, HotkeyNew);
+        UnregisterHotKey(_hwnd, HotkeyClose);
+        UnregisterHotKey(_hwnd, HotkeyNext);
+        UnregisterHotKey(_hwnd, HotkeyPrevious);
+        UnregisterHotKey(_hwnd, HotkeyCopy);
+        UnregisterHotKey(_hwnd, HotkeyPaste);
+        UnregisterHotKey(_hwnd, HotkeyMaximize);
+        UnregisterHotKey(_hwnd, HotkeyCloseAlt);
+
+        for (var i = 0; i < AppSettings.MaxTerminals; i++)
+        {
+            UnregisterHotKey(_hwnd, HotkeyPaneBase + i);
+        }
+
+        _hotkeysRegistered = false;
+    }
+
+    private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (msg == WmHotkey)
+        {
+            handled = true;
+            HandleHotkey(wParam.ToInt32());
+        }
+
+        return IntPtr.Zero;
+    }
+
+    private void HandleHotkey(int id)
+    {
+        switch (id)
+        {
+            case HotkeyNew:
+                _ = AddPaneAsync(null);
+                break;
+            case HotkeyClose:
+                CloseActivePane();
+                break;
+            case HotkeyCloseAlt:
+                CloseActivePane();
+                break;
+            case HotkeyNext:
+                CyclePane(1);
+                break;
+            case HotkeyPrevious:
+                CyclePane(-1);
+                break;
+            case HotkeyCopy:
+                _active?.CopySelection();
+                break;
+            case HotkeyPaste:
+                _active?.PasteClipboard();
+                break;
+            case HotkeyMaximize:
+                ToggleMaximize();
+                break;
+            default:
+                if (id >= HotkeyPaneBase && id < HotkeyPaneBase + AppSettings.MaxTerminals)
+                {
+                    FocusPane(id - HotkeyPaneBase);
+                }
+                break;
+        }
+    }
+
+    private void RestoreWindowPlacement()
+    {
+        try
+        {
+            if (!double.IsNaN(_settings.WindowLeft) && !double.IsNaN(_settings.WindowTop))
+            {
+                var rect = new Rect(_settings.WindowLeft, _settings.WindowTop, _settings.WindowWidth, _settings.WindowHeight);
+                var virtualDesktop = new Rect(
+                    SystemParameters.VirtualScreenLeft,
+                    SystemParameters.VirtualScreenTop,
+                    SystemParameters.VirtualScreenWidth,
+                    SystemParameters.VirtualScreenHeight);
+
+                rect.Intersect(virtualDesktop);
+                if (!rect.IsEmpty && rect.Width >= 400 && rect.Height >= 300)
+                {
+                    WindowStartupLocation = WindowStartupLocation.Manual;
+                    Left = _settings.WindowLeft;
+                    Top = _settings.WindowTop;
+                    Width = _settings.WindowWidth;
+                    Height = _settings.WindowHeight;
+                }
+            }
+
+            var workArea = GetWorkAreaInDips();
+            var maxWidth = Math.Max(MinWidth, workArea.Width - 24);
+            var maxHeight = Math.Max(MinHeight, workArea.Height - 24);
+
+            Width = Math.Min(Width, maxWidth);
+            Height = Math.Min(Height, maxHeight);
+
+            if (double.IsNaN(Left) || double.IsNaN(Top))
+            {
+                WindowStartupLocation = WindowStartupLocation.Manual;
+                Left = workArea.Left + Math.Max(0, (workArea.Width - Width) / 2);
+                Top = workArea.Top + Math.Max(0, (workArea.Height - Height) / 2);
+            }
+
+            if (Left < workArea.Left) Left = workArea.Left;
+            if (Top < workArea.Top) Top = workArea.Top;
+            if (Left + Width > workArea.Right) Left = Math.Max(workArea.Left, workArea.Right - Width);
+            if (Top + Height > workArea.Bottom) Top = Math.Max(workArea.Top, workArea.Bottom - Height);
+
+            if (_settings.WindowMaximized)
+            {
+                WindowState = WindowState.Maximized;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Falha ao restaurar a posição da janela: {ex.Message}");
+        }
+    }
+
+    private Rect GetWorkAreaInDips() => SystemParameters.WorkArea;
+
+    private void SaveWindowPlacement()
+    {
+        try
+        {
+            var bounds = WindowState == WindowState.Normal
+                ? new Rect(Left, Top, Width, Height)
+                : RestoreBounds;
+
+            if (bounds.Width >= 400 && bounds.Height >= 300)
+            {
+                _settings.WindowLeft = bounds.Left;
+                _settings.WindowTop = bounds.Top;
+                _settings.WindowWidth = bounds.Width;
+                _settings.WindowHeight = bounds.Height;
+            }
+
+            _settings.WindowMaximized = WindowState == WindowState.Maximized;
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Falha ao salvar a posição da janela: {ex.Message}");
+        }
+    }
+
+    private static string ModeLabel(ConnectionTarget? target) => target?.Kind switch
+    {
+        ConnectionKind.Lan => "LAN",
+        ConnectionKind.External => "externo",
+        ConnectionKind.Demo => "demo",
+        _ => "automático"
+    };
+
+    private static string ModeLabel(ConnectionMode? mode) => mode switch
+    {
+        ConnectionMode.Lan => "LAN forçada",
+        ConnectionMode.External => "externo forçado",
+        _ => "automático"
+    };
+
+    private static Brush Frozen(string hex)
+    {
+        var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex));
+        brush.Freeze();
+        return brush;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Point32
+    {
+        public int X;
+        public int Y;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
+
+    [DllImport("user32.dll")]
+    private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out Point32 point);
+}
+
+
+

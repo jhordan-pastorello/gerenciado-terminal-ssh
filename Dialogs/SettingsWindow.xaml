@@ -1,0 +1,232 @@
+﻿<Window x:Class="StorageTerm.Dialogs.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Configurações — StorageTerm"
+        Width="700" Height="760"
+        MinWidth="600" MinHeight="520"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="{StaticResource BgBrush}"
+        Foreground="{StaticResource TextBrush}"
+        FontFamily="{StaticResource UiFont}"
+        Icon="/Assets/StorageTerm.ico">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1">
+            <Border.Background>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                    <GradientStop Color="#0C1519" Offset="0" />
+                    <GradientStop Color="#050607" Offset="1" />
+                </LinearGradientBrush>
+            </Border.Background>
+            <Grid Margin="26,22,26,18">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="Configurações" FontFamily="{StaticResource DisplayFont}"
+                               FontSize="22" FontWeight="SemiBold" />
+                    <TextBlock Text="Conexões SSH, sessões e comportamento do aplicativo."
+                               FontSize="12.5" Foreground="{StaticResource TextDimBrush}" Margin="0,5,0,0" />
+                </StackPanel>
+                <Border Grid.Column="1" Width="44" Height="44" CornerRadius="12"
+                        Background="#0B2220" BorderBrush="#1B4A44" BorderThickness="1"
+                        VerticalAlignment="Center">
+                    <Path Data="{StaticResource IconSettings}" Width="20" Height="20" Stretch="Uniform"
+                          Fill="{StaticResource AccentBrush}"
+                          Stroke="{StaticResource AccentBrush}" StrokeThickness="1.7"
+                          StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
+                </Border>
+            </Grid>
+        </Border>
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled" Padding="26,4,26,10">
+            <StackPanel>
+
+                <StackPanel Orientation="Horizontal" Margin="2,0,0,8">
+                    <Border Width="16" Height="2" Background="{StaticResource AccentBrush}"
+                            CornerRadius="1" VerticalAlignment="Center" Margin="0,0,8,0" />
+                    <TextBlock Text="CONEXÃO SSH" FontSize="10" FontWeight="SemiBold"
+                               Foreground="{StaticResource TextMutedBrush}" />
+                </StackPanel>
+                <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}"
+                        BorderThickness="1" CornerRadius="12" Padding="18">
+                    <StackPanel>
+                        <TextBlock Text="Modo global" FontSize="11.5" Foreground="{StaticResource TextDimBrush}" />
+                        <UniformGrid Columns="3" Margin="0,7,0,0">
+                            <RadioButton x:Name="ModeAuto" Content="Automático" GroupName="mode"
+                                         Style="{StaticResource SegmentButton}" Margin="0,0,6,0" />
+                            <RadioButton x:Name="ModeLan" Content="Sempre LAN" GroupName="mode"
+                                         Style="{StaticResource SegmentButton}" Margin="3,0" />
+                            <RadioButton x:Name="ModeExternal" Content="Sempre externo" GroupName="mode"
+                                         Style="{StaticResource SegmentButton}" Margin="6,0,0,0" />
+                        </UniformGrid>
+                        <TextBlock Text="No modo automático, o app testa a LAN e cai para o perfil externo quando não há resposta."
+                                   FontSize="10.5" Foreground="{StaticResource TextMutedBrush}"
+                                   TextWrapping="Wrap" Margin="0,7,0,0" />
+
+                        <Grid Margin="0,15,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="16" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="Alias SSH da LAN" FontSize="11.5" Foreground="{StaticResource TextDimBrush}" />
+                                <TextBox x:Name="LanAliasBox" Style="{StaticResource DarkTextBox}" Margin="0,6,0,0" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="Alias SSH externo" FontSize="11.5" Foreground="{StaticResource TextDimBrush}" />
+                                <TextBox x:Name="ExternalAliasBox" Style="{StaticResource DarkTextBox}" Margin="0,6,0,0" />
+                            </StackPanel>
+                        </Grid>
+
+                        <Grid Margin="0,12,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="16" />
+                                <ColumnDefinition Width="110" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="Host de teste da LAN" FontSize="11.5" Foreground="{StaticResource TextDimBrush}" />
+                                <TextBox x:Name="ProbeHostBox" Style="{StaticResource DarkTextBox}" Margin="0,6,0,0" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="Porta" FontSize="11.5" Foreground="{StaticResource TextDimBrush}" />
+                                <TextBox x:Name="ProbePortBox" Style="{StaticResource DarkTextBox}" Margin="0,6,0,0" MaxLength="5" />
+                            </StackPanel>
+                        </Grid>
+
+                        <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+                            <Button x:Name="TestButton" Content="Testar agora" Style="{StaticResource OutlineButton}" Padding="10,5"
+                                    Click="Test_Click" />
+                            <TextBlock x:Name="TestResult" Text="" FontSize="11" VerticalAlignment="Center"
+                                       Margin="12,0,0,0" TextWrapping="Wrap" MaxWidth="380" />
+                        </StackPanel>
+
+                        <TextBlock x:Name="DetectedProfilesText" Text="" FontSize="10.5"
+                                   Foreground="{StaticResource TextDimBrush}" TextWrapping="Wrap"
+                                   Margin="0,12,0,0" />
+
+                        <TextBlock Text="Usa o ~/.ssh/config e a chave já cadastrada (id_ed25519). Se a chave não estiver no servidor, o ssh pede a senha dentro do próprio terminal."
+                                   FontSize="10.5" Foreground="{StaticResource TextMutedBrush}"
+                                   TextWrapping="Wrap" Margin="0,12,0,0" />
+                    </StackPanel>
+                </Border>
+
+                <StackPanel Orientation="Horizontal" Margin="2,20,0,8">
+                    <Border Width="16" Height="2" Background="{StaticResource AccentBrush}"
+                            CornerRadius="1" VerticalAlignment="Center" Margin="0,0,8,0" />
+                    <TextBlock Text="SESSÕES" FontSize="10" FontWeight="SemiBold"
+                               Foreground="{StaticResource TextMutedBrush}" />
+                </StackPanel>
+                <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}"
+                        BorderThickness="1" CornerRadius="12" Padding="18">
+                    <StackPanel>
+                        <CheckBox x:Name="AutoReconnectCheck" Style="{StaticResource DarkCheckBox}"
+                                  Content="Reconectar automaticamente quando a conexão cair" />
+                        <TextBlock Text="Tenta 1s, 2s, 4s, 8s e 16s; reavalia LAN/externo a cada tentativa."
+                                   FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Margin="25,4,0,14" />
+
+                        <CheckBox x:Name="ConfirmCloseCheck" Style="{StaticResource DarkCheckBox}"
+                                  Content="Pedir confirmação ao fechar um terminal conectado" />
+                        <TextBlock Text="Ctrl+Shift+W abre a confirmação; o ✕ do painel segue a mesma regra."
+                                   FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Margin="25,4,0,14" />
+
+                        <CheckBox x:Name="KeepAwakeCheck" Style="{StaticResource DarkCheckBox}"
+                                  Content="Manter o PC acordado enquanto houver sessões abertas" />
+                        <TextBlock Text="Evita a suspensão do Windows e mantém os processos ssh ativos. Com o app na bandeja, fechar a janela não encerra as sessões."
+                                   FontSize="10.5" Foreground="{StaticResource TextMutedBrush}"
+                                   TextWrapping="Wrap" Margin="25,4,0,0" />
+                    </StackPanel>
+                </Border>
+
+                <StackPanel Orientation="Horizontal" Margin="2,20,0,8">
+                    <Border Width="16" Height="2" Background="{StaticResource AccentBrush}"
+                            CornerRadius="1" VerticalAlignment="Center" Margin="0,0,8,0" />
+                    <TextBlock Text="SISTEMA" FontSize="10" FontWeight="SemiBold"
+                               Foreground="{StaticResource TextMutedBrush}" />
+                </StackPanel>
+                <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}"
+                        BorderThickness="1" CornerRadius="12" Padding="18">
+                    <StackPanel>
+                        <CheckBox x:Name="StartWithWindowsCheck" Style="{StaticResource DarkCheckBox}"
+                                  Content="Iniciar com o Windows (na bandeja)" />
+                        <TextBlock Text="Registra o app no Run do usuário atual, sem privilégios de administrador."
+                                   FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Margin="25,4,0,14" />
+
+                        <CheckBox x:Name="StartMinimizedCheck" Style="{StaticResource DarkCheckBox}"
+                                  Content="Ao iniciar com o Windows, ficar na bandeja" />
+                        <TextBlock x:Name="ExecutablePathText" Text="" FontSize="10.5"
+                                   Foreground="{StaticResource TextMutedBrush}" TextWrapping="Wrap"
+                                   Margin="25,4,0,14" />
+
+                        <CheckBox x:Name="HideToTrayCheck" Style="{StaticResource DarkCheckBox}"
+                                  Content="Fechar a janela para a bandeja (não encerra as sessões)" />
+                        <TextBlock Text="Para encerrar tudo, use Sair no menu do ícone da bandeja."
+                                   FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Margin="25,4,0,0" />
+                    </StackPanel>
+                </Border>
+
+                <StackPanel Orientation="Horizontal" Margin="2,20,0,8">
+                    <Border Width="16" Height="2" Background="{StaticResource AccentBrush}"
+                            CornerRadius="1" VerticalAlignment="Center" Margin="0,0,8,0" />
+                    <TextBlock Text="APARÊNCIA" FontSize="10" FontWeight="SemiBold"
+                               Foreground="{StaticResource TextMutedBrush}" />
+                </StackPanel>
+                <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}"
+                        BorderThickness="1" CornerRadius="12" Padding="18">
+                    <StackPanel>
+                        <TextBlock Text="Fonte do terminal" FontSize="11.5" Foreground="{StaticResource TextDimBrush}" />
+                        <TextBox x:Name="FontFamilyBox" Style="{StaticResource DarkTextBox}" Margin="0,6,0,0" />
+                        <TextBlock Text="Se a fonte não estiver instalada, o app usa Consolas automaticamente."
+                                   FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Margin="0,5,0,12" />
+
+                        <TextBlock Text="Tamanho" FontSize="11.5" Foreground="{StaticResource TextDimBrush}" />
+                        <StackPanel x:Name="SizePanel" Orientation="Horizontal" Margin="0,6,0,0">
+                            <RadioButton Content="11" Tag="11" GroupName="fontsize" Style="{StaticResource SegmentButton}" Padding="12,5" Margin="0,0,5,0" />
+                            <RadioButton Content="12" Tag="12" GroupName="fontsize" Style="{StaticResource SegmentButton}" Padding="12,5" Margin="0,0,5,0" />
+                            <RadioButton Content="13" Tag="13" GroupName="fontsize" Style="{StaticResource SegmentButton}" Padding="12,5" Margin="0,0,5,0" />
+                            <RadioButton Content="14" Tag="14" GroupName="fontsize" Style="{StaticResource SegmentButton}" Padding="12,5" Margin="0,0,5,0" />
+                            <RadioButton Content="16" Tag="16" GroupName="fontsize" Style="{StaticResource SegmentButton}" Padding="12,5" Margin="0,0,5,0" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <TextBlock x:Name="ErrorText" Text="" Foreground="{StaticResource RedBrush}"
+                           FontSize="11.5" TextWrapping="Wrap" Margin="2,16,0,0" />
+                <TextBlock Text="" Margin="0,0,0,8" />
+            </StackPanel>
+        </ScrollViewer>
+
+        <Border Grid.Row="2" BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="0,1,0,0">
+            <Border.Background>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                    <GradientStop Color="#070A0D" Offset="0" />
+                    <GradientStop Color="#050607" Offset="1" />
+                </LinearGradientBrush>
+            </Border.Background>
+            <Grid Margin="26,12">
+                <TextBlock Text="As alterações são aplicadas ao salvar."
+                           FontSize="10.5" Foreground="{StaticResource TextMutedBrush}"
+                           VerticalAlignment="Center" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button Content="Cancelar" Style="{StaticResource OutlineButton}" IsCancel="True"
+                            Click="Cancel_Click" MinWidth="82" Padding="10,5" Margin="0,0,8,0" />
+                    <Button Content="Salvar" Style="{StaticResource AccentButton}" Click="Save_Click" MinWidth="82" Padding="10,5" />
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>
+
+
