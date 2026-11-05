@@ -34,6 +34,7 @@
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
 
                     <Border x:Name="ActiveBar"
@@ -107,11 +108,22 @@
                               StrokeEndLineCap="Round" StrokeLineJoin="Round" />
                     </Button>
 
-                    <Button x:Name="CloseButton"
+                    <Button x:Name="PaneMenuButton"
                             Grid.Column="6"
                             Style="{StaticResource PaneIconButton}"
+                            AutomationProperties.Name="Opções do terminal"
+                            ToolTip="Opções do terminal"
+                            Click="PaneMenu_Click">
+                        <Path Data="{StaticResource IconMore}" Width="10" Height="10" Stretch="Uniform"
+                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}"
+                              StrokeThickness="2.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
+                    </Button>
+
+                    <Button x:Name="CloseButton"
+                            Grid.Column="7"
+                            Style="{StaticResource PaneIconButton}"
                             AutomationProperties.Name="Fechar terminal"
-                            ToolTip="Fechar terminal (Ctrl+Shift+Q / Ctrl+Shift+W)"
+                            ToolTip="Fechar terminal (Ctrl+Q / Ctrl+Shift+W)"
                             Click="Close_Click">
                         <Path Data="{StaticResource IconClose}" Width="10" Height="10" Stretch="Uniform"
                               Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}"
@@ -130,6 +142,7 @@
         </Grid>
     </Border>
 </UserControl>
+
 
 
 

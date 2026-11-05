@@ -157,7 +157,7 @@
                                Foreground="{StaticResource TextDimBrush}" VerticalAlignment="Center" />
                 </StackPanel>
 
-                <TextBlock Grid.Column="1" Text="Ctrl+T novo  ·  Ctrl+Shift+W fechar"
+                <TextBlock Grid.Column="1" Text="Ctrl+T novo  ·  Ctrl+Q fechar"
                            FontSize="9" Foreground="{StaticResource TextMutedBrush}"
                            HorizontalAlignment="Center" VerticalAlignment="Center"
                            TextTrimming="CharacterEllipsis" Margin="16,0" />

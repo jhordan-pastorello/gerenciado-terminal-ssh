@@ -1448,6 +1448,14 @@ public partial class MainWindow : Window
                       (GetAsyncKeyState(VkMenu) & 0x8000) != 0;
             var shift = (GetAsyncKeyState(VkShift) & 0x8000) != 0;
 
+            // Ctrl+Q sem Alt fecha o terminal ativo. AltGr+Q (Ctrl+Alt+Q)
+            // continua digitando "/" e nunca cai neste bloco.
+            if (ctrl && !alt && !shift && info.vkCode == 0x51)
+            {
+                _ = Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(CloseActivePane));
+                return (IntPtr)1;
+            }
+
             // AltGr = Ctrl+Alt. Compõe o caractere com o layout ABNT2 e envia
             // direto ao PTY, evitando sequências CSI do controle/tmux.
             if (ctrl && alt && !IsModifierKey(info.vkCode))
@@ -1706,6 +1714,7 @@ public partial class MainWindow : Window
     [DllImport("user32.dll")]
     private static extern bool GetCursorPos(out Point32 point);
 }
+
 
 
 

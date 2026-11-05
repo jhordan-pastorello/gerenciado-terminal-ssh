@@ -103,15 +103,15 @@ Os apps instalados passam a ver a `v1.0.1` e se atualizam sozinhos. A tag precis
 | Atalho | Ação |
 |---|---|
 | `Ctrl+T` | Novo terminal (até 6) |
-| `Ctrl+Shift+W` | Fechar o terminal ativo (com confirmação, se configurado) |
-| `Ctrl+Shift+Q` | Fechar o terminal ativo (alternativa) |
+| `Ctrl+Q` | Fechar o terminal ativo (com confirmação, se configurado) |
+| `Ctrl+Shift+W` | Fechar o terminal ativo (alternativa) |
 | `Ctrl+Shift+1` … `Ctrl+Shift+6` | Focar o terminal N |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Próximo / anterior |
 | `Ctrl+Shift+C` | Copiar a seleção |
 | `Ctrl+Shift+V` | Colar |
 | `F11` | Maximizar / restaurar |
 
-`AltGr` (Ctrl+Alt) **nunca é capturado**: o app compõe o caractere com o layout ABNT2 e envia direto ao PTY, então `/`, `?`, `°`, `!`, `@`, `#` funcionam inclusive dentro do tmux. Para fechar o painel use `Ctrl+Shift+Q` ou `Ctrl+Shift+W`, sem Alt.
+`AltGr` (Ctrl+Alt) **nunca é capturado**: o app compõe o caractere com o layout ABNT2 e envia direto ao PTY, então `/`, `?`, `°`, `!`, `@`, `#` funcionam inclusive dentro do tmux. `Ctrl+Q` só fecha o painel quando `Alt` **não** está pressionado; `Ctrl+Shift+W` é a alternativa.
 
 Os atalhos são registrados como *hotkeys* enquanto a janela está ativa. Isso faz `Ctrl+T` funcionar mesmo com o terminal nativo focado (dentro do SSH), sem enviar o atalho para o servidor.
 
@@ -175,7 +175,7 @@ O comando continua sendo `ssh <alias>`, então o OpenSSH resolve `HostName`, `Us
 
 - O processo principal do app é o "daemon": ele é dono dos PTYs/ConPTY e dos processos `ssh`.
 - Fechar a janela (**X**) esconde para a bandeja e **mantém as sessões**.
-- **`Ctrl+Shift+Q`** (ou **`Ctrl+Shift+W`**) fecha **o terminal ativo**. Se for o último, o app continua aberto (tela vazia + bandeja); use **Sair** no menu do ícone para encerrar o app e os SSH.
+- **`Ctrl+Q`** (ou **`Ctrl+Shift+W`**) fecha **o terminal ativo**. Se for o último, o app continua aberto (tela vazia + bandeja); use **Sair** no menu do ícone para encerrar o app e os SSH.
 - **Sair** no menu do ícone da bandeja encerra os SSH e o app.
 - Iniciar com o Windows usa `--tray`: a janela abre oculta e já cria a primeira sessão.
 - Uma segunda execução do `.exe` apenas mostra a janela da instância existente.
@@ -255,7 +255,7 @@ A solução `StorageTerm.slnx` inclui o app e os testes (34 testes de layout e v
 ## Solução de problemas
 
 **AltGr / ABNT2 (`/`, `?`, `°`, `!`, `@`) não digitam**
-Atualize para a versão **1.0.2+**. Ela usa o modo de entrada de texto do Windows Terminal e um hook de AltGr que compõe o caractere e o envia direto ao PTY; `Ctrl+Alt+Q/W/E` voltam a produzir `/`, `?`, `°` inclusive no tmux. Para fechar o painel use `Ctrl+Shift+Q` ou `Ctrl+Shift+W`.
+Atualize para a versão **1.0.3+**. Ela usa o modo de entrada de texto do Windows Terminal e um hook de AltGr que compõe o caractere e o envia direto ao PTY; `Ctrl+Alt+Q/W/E` voltam a produzir `/`, `?`, `°` inclusive no tmux. `Ctrl+Q` só fecha o painel quando Alt **não** está pressionado.
 
 **Suspender o notebook derruba o SSH**
 A conexão TCP não sobrevive à suspensão. Ative **Sessão persistente (tmux)** (padrão): o trabalho continua no servidor e o app reata ao acordar. Sem tmux, o shell é recriado e o que estava rodando se perde.

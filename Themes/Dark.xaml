@@ -50,6 +50,9 @@
     <PathGeometry x:Key="IconCopy" Figures="M 9 9 H 19 V 19 H 9 Z M 5 15 V 5 H 15" />
     <PathGeometry x:Key="IconPaste" Figures="M 8 4 H 16 V 7 H 8 Z M 6 6 H 4 V 20 H 18 V 16 M 8 11 H 16 M 8 15 H 13" />
     <PathGeometry x:Key="IconMore" Figures="M 6 12 H 6.01 M 12 12 H 12.01 M 18 12 H 18.01" />
+    <PathGeometry x:Key="IconMinimize" Figures="M 5 12 H 19" />
+    <PathGeometry x:Key="IconMaximize" Figures="M 5 5 H 19 V 19 H 5 Z" />
+    <PathGeometry x:Key="IconRestore" Figures="M 7 7 H 19 V 19 H 7 Z M 5 5 V 17 H 17" />
 
     <!-- ===== Botões ===== -->
     <Style x:Key="ToolButton" TargetType="{x:Type Button}">

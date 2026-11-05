@@ -18,8 +18,8 @@
     <Description>Gerenciador de terminais SSH com layout inteligente para storage-lan / storage.</Description>
     <Company>StorageTerm</Company>
     <Copyright>Copyright © 2026</Copyright>
-    <Version>1.0.2</Version>
-    <FileVersion>1.0.2.0</FileVersion>
+    <Version>1.0.3</Version>
+    <FileVersion>1.0.3.0</FileVersion>
     <RepositoryUrl>https://github.com/jhordan-pastorello/gerenciado-terminal-ssh</RepositoryUrl>
     <PackageProjectUrl>https://github.com/jhordan-pastorello/gerenciado-terminal-ssh</PackageProjectUrl>
     <PublishSingleFile>false</PublishSingleFile>
@@ -51,3 +51,4 @@
   </ItemGroup>
 
 </Project>
+

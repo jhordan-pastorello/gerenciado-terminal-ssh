@@ -89,8 +89,28 @@ public partial class App : System.Windows.Application
 
     private static void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
     {
+        // O controle de terminal pode encerrar a leitura do ConPTY depois que o
+        // pane é descartado; isso é esperado e não deve assustar no log.
+        if (IsTerminalTeardownRace(e.Exception))
+        {
+            Log.Info("Leitura do terminal encerrada junto com o pane.");
+            e.SetObserved();
+            return;
+        }
+
         Log.Error("Exceção não observada em tarefa.", e.Exception);
         e.SetObserved();
+    }
+
+    private static bool IsTerminalTeardownRace(Exception? exception)
+    {
+        IEnumerable<Exception?> items = exception is AggregateException aggregate
+            ? aggregate.Flatten().InnerExceptions
+            : new Exception?[] { exception };
+
+        return items.Any(item =>
+            item is ObjectDisposedException &&
+            item.StackTrace?.Contains("Wpf.Ui.Terminal", StringComparison.Ordinal) == true);
     }
 
     protected override void OnExit(ExitEventArgs e)

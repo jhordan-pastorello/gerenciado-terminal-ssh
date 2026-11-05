@@ -130,7 +130,7 @@
 
                         <CheckBox x:Name="ConfirmCloseCheck" Style="{StaticResource DarkCheckBox}"
                                   Content="Pedir confirmação ao fechar um terminal conectado" />
-                        <TextBlock Text="Ctrl+Shift+Q ou Ctrl+Shift+W abrem a confirmação; o ✕ do painel segue a mesma regra."
+                        <TextBlock Text="Ctrl+Q ou Ctrl+Shift+W abrem a confirmação; o ✕ do painel segue a mesma regra."
                                    FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Margin="25,4,0,14" />
 
                         <CheckBox x:Name="KeepAwakeCheck" Style="{StaticResource DarkCheckBox}"

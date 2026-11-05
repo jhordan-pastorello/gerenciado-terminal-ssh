@@ -443,7 +443,7 @@ public partial class TerminalPane : UserControl, IDisposable
         var clear = new MenuItem { Header = "Limpar tela (visual)" };
         clear.Click += (_, _) => ClearScreen();
 
-        var close = new MenuItem { Header = "Fechar terminal", InputGestureText = "Ctrl+Shift+W" };
+        var close = new MenuItem { Header = "Fechar terminal", InputGestureText = "Ctrl+Q" };
         close.Click += (_, _) => CloseRequested?.Invoke(this, EventArgs.Empty);
 
         menu.Items.Add(reconnect);
@@ -516,6 +516,20 @@ public partial class TerminalPane : UserControl, IDisposable
     {
         e.Handled = true;
         ReconnectRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void PaneMenu_Click(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        Activated?.Invoke(this, EventArgs.Empty);
+
+        if (Header.ContextMenu is { } menu)
+        {
+            menu.PlacementTarget = PaneMenuButton;
+            menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+            menu.HorizontalOffset = -140;
+            menu.IsOpen = true;
+        }
     }
 
     private void Close_Click(object sender, RoutedEventArgs e)
