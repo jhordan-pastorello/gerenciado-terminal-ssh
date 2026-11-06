@@ -6,7 +6,8 @@ Gerenciador de terminais SSH para Windows, feito para alternar entre **`storage-
 
 - **Interface minimalista**: barra de 44 px, sem logo na barra, tema **grafite monocromático** (sem verde) e ações secundárias no menu **⋯**; mais área para o terminal.
 - **Auto-update**: a versão instalada baixa releases novas do GitHub, confere o SHA-256 e aplica sozinha ao sair (ou em **⋯ → Atualizar agora**).
-- **1 a 6 terminais**, sempre começando com **um**. `Ctrl+T` abre o próximo e o mosaico se reorganiza sozinho.
+- **Terminais ilimitados no carrossel**: **2 visíveis por vez**, novos abrem à direita e o carrossel desliza suavemente; role com dois dedos no touchpad, `Shift+wheel`, a barra horizontal ou `Alt+PageUp/PageDown`.
+- **Cores por terminal e título de branch**: cada painel tem uma cor; a barra superior mostra a branch do agente (ou `pasta: ...` quando não há git) e acompanha o painel sob o mouse.
 - **Abre direto no SSH**: o primeiro painel já executa `ssh storage-lan` ou `ssh storage`; shell local só no modo `--demo`.
 - **Identificação correta**: usuário, host, porta e chave vêm do `~/.ssh/config` e aparecem no título da janela, no cabeçalho do painel e nas configurações.
 - **Layout inteligente**: 1 inteiro, 2 lado a lado, 3 com um grande + dois empilhados, 4 em 2×2, 5 com uma coluna extra e 6 em 3×2.
@@ -102,10 +103,12 @@ Os apps instalados passam a ver a `v1.0.1` e se atualizam sozinhos. A tag precis
 
 | Atalho | Ação |
 |---|---|
-| `Ctrl+T` | Novo terminal (até 6) |
+| `Ctrl+T` | Novo terminal (sem limite) |
 | `Ctrl+Q` | Fechar o terminal ativo (com confirmação, se configurado) |
 | `Ctrl+Shift+W` | Fechar o terminal ativo (alternativa) |
 | `Ctrl+Shift+1` … `Ctrl+Shift+6` | Focar o terminal N |
+| `Alt+PageUp` / `Alt+PageDown` | Rolar o carrossel para a esquerda / direita |
+| `Shift+wheel` | Rolar o carrossel horizontalmente |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Próximo / anterior |
 | `Ctrl+Shift+C` | Copiar a seleção |
 | `Ctrl+V` | Colar texto ou imagem (imagem sobe via scp e o caminho remoto é colado) |
@@ -126,28 +129,16 @@ Os atalhos são registrados como *hotkeys* enquanto a janela está ativa. Isso f
 
 Isso funciona com agentes CLI que aceitam caminho de arquivo (Kiro, Claude Code, Codex etc.): cole a imagem e pressione **Enter** para o agente ler o arquivo. O envio usa a chave SSH do `~/.ssh/config`, então não pede senha. Se a área de transferência tiver só texto, `Ctrl+V` cola o texto normalmente; `Ctrl+Shift+V` continua funcionando como alternativa.
 
-## Layouts
+## Carrossel de terminais
 
-```text
-1 painel                 2 painéis                3 painéis
-┌───────────────┐        ┌───────┬───────┐        ┌───────┬───────┐
-│       1       │        │   1   │   2   │        │   1   │       │
-└───────────────┘        └───────┴───────┘        ├───────┤   3   │
-                                                  │   2   │       │
-                                                  └───────┴───────┘
-
-4 painéis                5 painéis                6 painéis
-┌───────┬───────┐        ┌─────┬─────┬─────┐      ┌─────┬─────┬─────┐
-│   1   │   2   │        │  1  │  2  │     │      │  1  │  2  │  3  │
-├───────┼───────┤        ├─────┼─────┤  5  │      ├─────┼─────┼─────┤
-│   3   │   4   │        │  3  │  4  │     │      │  4  │  5  │  6  │
-└───────┴───────┘        └─────┴─────┴─────┘      └─────┴─────┴─────┘
-```
-
-- Em **3** e **5**, o terminal **mais novo** ocupa o espaço grande/coluna extra. Os demais ficam empilhados na ordem de criação.
-- Em **4** e **6**, a ordem é de leitura.
-- Ao fechar um painel, os restantes refluem mantendo a ordem. O limite é **6**; a sétima tentativa mostra um aviso.
-- Abrir com um terminal é o padrão. `--panes=N` existe apenas para testes/demonstração.
+- Sempre **2 painéis visíveis**, lado a lado.
+- Novos terminais entram **à direita**; o carrossel desliza até eles com animação suave.
+- **Sem limite** de terminais.
+- Rolagem lateral: dois dedos no touchpad, `Shift+wheel`, `Alt+PageUp/PageDown` ou a barra horizontal fina no rodapé.
+- Cada painel tem uma **cor própria** e uma faixa colorida no topo.
+- A barra superior mostra a **branch** do agente daquele painel; se não houver git, mostra `pasta: <nome>`.
+- Passar o mouse sobre um painel **dá foco** e atualiza a cor/branch na barra.
+- `--panes=N` existe apenas para testes/demonstração.
 
 ## LAN × externo
 

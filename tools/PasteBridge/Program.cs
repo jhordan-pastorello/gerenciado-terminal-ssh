@@ -81,7 +81,7 @@ internal static class StorageTermVersion
                 var text = FileVersionInfo.GetVersionInfo(ExePath).FileVersion;
                 var raw = text?.Split('+').FirstOrDefault();
                 if (!Version.TryParse(raw, out var version)) return false;
-                return version >= new Version(1, 0, 6);
+                return version >= new Version(1, 0, 7);
             }
             catch
             {
