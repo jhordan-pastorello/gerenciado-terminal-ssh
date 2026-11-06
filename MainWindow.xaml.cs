@@ -61,6 +61,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _updateTimer = new() { Interval = TimeSpan.FromHours(6) };
     private readonly DispatcherTimer _branchTimer = new() { Interval = TimeSpan.FromSeconds(10) };
     private readonly DispatcherTimer _hoverTimer = new() { Interval = TimeSpan.FromMilliseconds(180) };
+    private readonly DispatcherTimer _scrollAnimTimer = new() { Interval = TimeSpan.FromMilliseconds(16) };
     private readonly UpdateService _updateService = new();
 
     private static readonly Color[] PaneColors =
@@ -102,6 +103,8 @@ public partial class MainWindow : Window
     private bool _balloonShown;
     private bool _startupComplete;
     private bool _branchFetchInFlight;
+    private bool _scrollAnimating;
+    private double _scrollTarget;
 
     public MainWindow(AppSettings settings, StartupOptions startup)
     {
@@ -121,6 +124,7 @@ public partial class MainWindow : Window
 
         _branchTimer.Tick += (_, _) => _ = RefreshBranchesAsync();
         _hoverTimer.Tick += (_, _) => UpdateHoverFocus();
+        _scrollAnimTimer.Tick += (_, _) => AnimateScroll();
         PaneScroller.SizeChanged += (_, _) => LayoutPanes();
         SizeChanged += (_, _) => LayoutPanes();
         StateChanged += (_, _) => LayoutPanes();
@@ -441,7 +445,7 @@ public partial class MainWindow : Window
 
         if (_panes.Count > 0 && ReferenceEquals(_active, _panes[^1]))
         {
-            PaneScroller.ScrollToRightEnd();
+            SmoothScrollTo(PaneScroller.ScrollableWidth);
             return;
         }
 
@@ -452,18 +456,19 @@ public partial class MainWindow : Window
 
         if (left < offset)
         {
-            PaneScroller.ScrollToHorizontalOffset(Math.Max(0, left - 3));
+            SmoothScrollTo(Math.Max(0, left - 3));
         }
         else if (right > offset + viewport)
         {
-            PaneScroller.ScrollToHorizontalOffset(right - viewport + 3);
+            SmoothScrollTo(right - viewport + 3);
         }
     }
 
     private void PaneScroller_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
         if ((Keyboard.Modifiers & ModifierKeys.Shift) == 0) return;
-        PaneScroller.ScrollToHorizontalOffset(PaneScroller.HorizontalOffset - e.Delta);
+        var baseOffset = _scrollAnimating ? _scrollTarget : PaneScroller.HorizontalOffset;
+        SmoothScrollTo(baseOffset - e.Delta * 0.6);
         e.Handled = true;
     }
 
@@ -1430,6 +1435,7 @@ public partial class MainWindow : Window
         _updateTimer.Stop();
         _branchTimer.Stop();
         _hoverTimer.Stop();
+        _scrollAnimTimer.Stop();
 
         UnregisterHotkeys();
 
@@ -1556,9 +1562,36 @@ public partial class MainWindow : Window
     {
         if (_panes.Count <= 2) return;
 
-        var step = Math.Max(220, PaneScroller.ViewportWidth / 2);
-        var target = PaneScroller.HorizontalOffset + direction * step;
-        PaneScroller.ScrollToHorizontalOffset(Math.Clamp(target, 0, PaneScroller.ScrollableWidth));
+        var baseOffset = _scrollAnimating ? _scrollTarget : PaneScroller.HorizontalOffset;
+        var step = Math.Max(160, PaneScroller.ViewportWidth * 0.18);
+        SmoothScrollTo(baseOffset + direction * step);
+    }
+
+    private void SmoothScrollTo(double target)
+    {
+        _scrollTarget = Math.Clamp(target, 0, Math.Max(0, PaneScroller.ScrollableWidth));
+        if (_scrollAnimating) return;
+
+        _scrollAnimating = true;
+        _scrollAnimTimer.Start();
+    }
+
+    private void AnimateScroll()
+    {
+        if (!_scrollAnimating) return;
+
+        var current = PaneScroller.HorizontalOffset;
+        var difference = _scrollTarget - current;
+
+        if (Math.Abs(difference) < 0.8)
+        {
+            PaneScroller.ScrollToHorizontalOffset(_scrollTarget);
+            _scrollAnimating = false;
+            _scrollAnimTimer.Stop();
+            return;
+        }
+
+        PaneScroller.ScrollToHorizontalOffset(current + difference * 0.18);
     }
 
     private void FocusPane(int index)
