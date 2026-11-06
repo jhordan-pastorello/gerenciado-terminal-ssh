@@ -191,6 +191,7 @@ Por padrão, cada painel abre/reatar uma sessão `tmux` no servidor (`storage-1`
 - ao reconectar/acordar, o app usa `tmux new-session -A` e volta para a mesma sessão;
 - o retorno da suspensão (`WM_POWERBROADCAST`) dispara uma reconexão automática após alguns segundos;
 - a barra de status do tmux fica oculta e as bordas em cinza, mantendo o visual limpo e monocromático;
+- o app fixa `escape-time 500` e `focus-events off` no tmux para evitar lixo de sequências do terminal ao reatar (ex.: `[>84;0;0c`);
 - se o servidor não tiver tmux, o comando cai para um shell bash normal.
 
 A opção fica em **Configurações → Sessões → Sessão persistente no servidor (tmux)** (ligada por padrão). O tmux já está instalado no seu servidor.
@@ -256,6 +257,9 @@ A solução `StorageTerm.slnx` inclui o app e os testes (34 testes de layout e v
 
 **AltGr / ABNT2 (`/`, `?`, `°`, `!`, `@`) não digitam**
 Atualize para a versão **1.0.3+**. Ela usa o modo de entrada de texto do Windows Terminal e um hook de AltGr que compõe o caractere e o envia direto ao PTY; `Ctrl+Alt+Q/W/E` voltam a produzir `/`, `?`, `°` inclusive no tmux. `Ctrl+Q` só fecha o painel quando Alt **não** está pressionado.
+
+**Ao abrir/reatar aparece lixo tipo `[>84;0;0c` ou `?61;6;7;…c`**
+Sequências de resposta do terminal vazando para o shell ao reatar o tmux. Atualize para **1.0.4+**: o app fixa `escape-time 500` e `focus-events off` no servidor, que é a correção recomendada para Windows Terminal/ConPTY + tmux.
 
 **Suspender o notebook derruba o SSH**
 A conexão TCP não sobrevive à suspensão. Ative **Sessão persistente (tmux)** (padrão): o trabalho continua no servidor e o app reata ao acordar. Sem tmux, o shell é recriado e o que estava rodando se perde.
