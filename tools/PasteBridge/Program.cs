@@ -81,7 +81,7 @@ internal static class StorageTermVersion
                 var text = FileVersionInfo.GetVersionInfo(ExePath).FileVersion;
                 var raw = text?.Split('+').FirstOrDefault();
                 if (!Version.TryParse(raw, out var version)) return false;
-                return version >= new Version(1, 0, 5);
+                return version >= new Version(1, 0, 6);
             }
             catch
             {
@@ -97,8 +97,11 @@ internal sealed class BridgeContext : ApplicationContext
         Environment.GetEnvironmentVariable("STORAGETERM_PASTE_DEBUG") == "1";
 
     private const int WhKeyboardLl = 13;
+    private const int WhMouseLl = 14;
     private const int WmKeyDown = 0x0100;
     private const int WmSysKeyDown = 0x0104;
+    private const int WmMouseWheel = 0x020A;
+    private const int WmMouseHWheel = 0x020E;
     private const int VkShift = 0x10;
     private const int VkControl = 0x11;
     private const int VkMenu = 0x12;
@@ -113,6 +116,8 @@ internal sealed class BridgeContext : ApplicationContext
     private static BridgeContext? _instance;
     private static LowLevelKeyboardProc? _hookProc;
     private static IntPtr _hook;
+    private static LowLevelMouseProc? _mouseProc;
+    private static IntPtr _mouseHook;
 
     private readonly Form _pump;
     private readonly System.Windows.Forms.Timer _pasteTimer;
@@ -120,6 +125,7 @@ internal sealed class BridgeContext : ApplicationContext
     private readonly BridgeSettings _settings;
     private readonly string _logFile;
     private int _targetPid;
+    private IntPtr _targetHwnd;
     private long _lastPidRefresh;
     private long _lastVersionCheck;
 
@@ -159,8 +165,37 @@ internal sealed class BridgeContext : ApplicationContext
             return;
         }
 
+        _mouseProc = MouseHookCallback;
+        _mouseHook = SetWindowsHookExMouse(WhMouseLl, _mouseProc, GetModuleHandle(null), 0);
+        if (_mouseHook == IntPtr.Zero)
+        {
+            Log($"Falha ao instalar hook de mouse: {Marshal.GetLastWin32Error()}");
+        }
+
         RefreshTargetPid();
         Log($"Ponte de colagem iniciada. debug={DebugTarget} targetPid={_targetPid}");
+    }
+
+    private static IntPtr MouseHookCallback(int nCode, IntPtr wParam, IntPtr lParam)
+    {
+        if (nCode >= 0 && (wParam == (IntPtr)WmMouseWheel || wParam == (IntPtr)WmMouseHWheel))
+        {
+            var info = Marshal.PtrToStructure<MsllHookStruct>(lParam);
+            if (_instance != null && wParam == (IntPtr)WmMouseWheel)
+            {
+                var hwnd = _instance.FindTerminalForWheel(info.Point);
+                if (hwnd != IntPtr.Zero)
+                {
+                    var delta = (short)(info.MouseData >> 16);
+                    var wheelParam = (IntPtr)((delta & 0xFFFF) << 16);
+                    var positionParam = (IntPtr)((info.Point.X & 0xFFFF) | ((info.Point.Y & 0xFFFF) << 16));
+                    SendMessage(hwnd, WmMouseWheel, wheelParam, positionParam);
+                    return (IntPtr)1;
+                }
+            }
+        }
+
+        return CallNextHookEx(_mouseHook, nCode, wParam, lParam);
     }
 
     private static IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
@@ -206,11 +241,60 @@ internal sealed class BridgeContext : ApplicationContext
             var app = Process.GetProcessesByName("StorageTerm")
                 .FirstOrDefault(p => p.MainWindowHandle != 0);
             _targetPid = app?.Id ?? 0;
+            _targetHwnd = app?.MainWindowHandle ?? IntPtr.Zero;
         }
         catch
         {
             _targetPid = 0;
+            _targetHwnd = IntPtr.Zero;
         }
+    }
+
+    private IntPtr FindTerminalForWheel(NativePoint point)
+    {
+        if (_targetHwnd == IntPtr.Zero || !IsWindowVisible(_targetHwnd) || IsIconic(_targetHwnd))
+        {
+            return IntPtr.Zero;
+        }
+
+        // Mesmo sem a janela em foco: se o ponto está sobre um terminal do app
+        // (e o app é a janela no topo naquele ponto), rola aquele painel.
+        var hit = WindowFromPoint(point);
+        if (hit != IntPtr.Zero &&
+            GetClassNameText(hit).Equals("HwndTerminalClass", StringComparison.OrdinalIgnoreCase) &&
+            GetAncestor(hit, 2 /* GA_ROOT */) == _targetHwnd)
+        {
+            return hit;
+        }
+
+        // Com o app em foco, usa o retângulo dos terminais (funciona mesmo se
+        // houver um overlay de gesto do Windows em cima do ponto).
+        return GetForegroundWindow() == _targetHwnd ? FindTerminalHwnd(point) : IntPtr.Zero;
+    }
+
+    private IntPtr FindTerminalHwnd(NativePoint point)
+    {
+        if (_targetHwnd == IntPtr.Zero) return IntPtr.Zero;
+
+        var found = IntPtr.Zero;
+        EnumChildWindows(_targetHwnd, (hwnd, _) =>
+        {
+            if (!GetClassNameText(hwnd).Equals("HwndTerminalClass", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (!IsWindowVisible(hwnd) || !GetWindowRect(hwnd, out var rect)) return true;
+            if (point.X < rect.Left || point.X >= rect.Right || point.Y < rect.Top || point.Y >= rect.Bottom)
+            {
+                return true;
+            }
+
+            found = hwnd;
+            return false;
+        }, IntPtr.Zero);
+
+        return found;
     }
 
     private bool IsTargetForeground()
@@ -473,6 +557,14 @@ internal sealed class BridgeContext : ApplicationContext
         return buffer.ToString();
     }
 
+    private static string GetClassNameText(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero) return string.Empty;
+        var buffer = new StringBuilder(256);
+        GetClassName(hwnd, buffer, buffer.Capacity);
+        return buffer.ToString();
+    }
+
     private static bool IsCtrlDown() => (GetAsyncKeyState(VkControl) & 0x8000) != 0;
     private static bool IsShiftDown() => (GetAsyncKeyState(VkShift) & 0x8000) != 0;
 
@@ -553,6 +645,12 @@ internal sealed class BridgeContext : ApplicationContext
             _hook = IntPtr.Zero;
         }
 
+        if (_mouseHook != IntPtr.Zero)
+        {
+            UnhookWindowsHookEx(_mouseHook);
+            _mouseHook = IntPtr.Zero;
+        }
+
         _watchTimer.Stop();
         _pasteTimer.Stop();
         _watchTimer.Dispose();
@@ -560,6 +658,32 @@ internal sealed class BridgeContext : ApplicationContext
         try { _pump.Dispose(); } catch { }
         Log("Ponte encerrada.");
         base.ExitThreadCore();
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint
+    {
+        public int X;
+        public int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MsllHookStruct
+    {
+        public NativePoint Point;
+        public uint MouseData;
+        public uint Flags;
+        public uint Time;
+        public UIntPtr ExtraInfo;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -618,8 +742,15 @@ internal sealed class BridgeContext : ApplicationContext
 
     private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
 
+    private delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+    private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc lpfn, IntPtr hMod, uint dwThreadId);
+
+    [DllImport("user32.dll", SetLastError = true, EntryPoint = "SetWindowsHookExW")]
+    private static extern IntPtr SetWindowsHookExMouse(int idHook, LowLevelMouseProc lpfn, IntPtr hMod, uint dwThreadId);
 
     [DllImport("user32.dll")]
     private static extern bool UnhookWindowsHookEx(IntPtr hhk);
@@ -644,6 +775,30 @@ internal sealed class BridgeContext : ApplicationContext
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint count, Input[] inputs, int size);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr WindowFromPoint(NativePoint point);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetClassName(IntPtr hWnd, StringBuilder className, int maxCount);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SendMessage(IntPtr hWnd, int message, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumChildWindows(IntPtr parent, EnumWindowsProc callback, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hWnd, out NativeRect rect);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsIconic(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetAncestor(IntPtr hWnd, uint gaFlags);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr GetModuleHandle(string? moduleName);

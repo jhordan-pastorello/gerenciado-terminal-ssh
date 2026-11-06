@@ -45,6 +45,7 @@ public partial class TerminalPane : UserControl, IDisposable
     public ConnectionMode ResolvedMode { get; private set; } = ConnectionMode.External;
     public ConnectionMode? ModeOverride { get; set; }
     public PaneStatus Status { get; private set; } = PaneStatus.Connecting;
+    public string StatusLabel => StatusText.Text;
     public bool IsDemo { get; private set; }
     public bool IsExitHandled { get; private set; }
     public DateTime StartedAt { get; private set; } = DateTime.UtcNow;
@@ -575,10 +576,14 @@ public partial class TerminalPane : UserControl, IDisposable
     {
         e.Handled = true;
         Activated?.Invoke(this, EventArgs.Empty);
+        OpenPaneMenu(PaneMenuButton);
+    }
 
+    public void OpenPaneMenu(FrameworkElement target)
+    {
         if (Header.ContextMenu is { } menu)
         {
-            menu.PlacementTarget = PaneMenuButton;
+            menu.PlacementTarget = target;
             menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
             menu.HorizontalOffset = -140;
             menu.IsOpen = true;

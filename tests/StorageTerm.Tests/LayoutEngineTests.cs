@@ -166,6 +166,7 @@ public class SshCommandBuilderTests
         Assert.Contains("extended-keys off", command);
         Assert.Contains("escape-time 500", command);
         Assert.Contains("focus-events off", command);
+        Assert.Contains("mouse on", command);
         Assert.Contains("exec bash -l", command);
     }
 

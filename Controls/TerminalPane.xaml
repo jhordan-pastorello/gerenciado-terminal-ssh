@@ -13,13 +13,15 @@
             PreviewMouseLeftButtonDown="PaneBorder_PreviewMouseLeftButtonDown">
         <Grid>
             <Grid.RowDefinitions>
-                <RowDefinition Height="26" />
+                <RowDefinition Height="0" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
-            <!-- Cabeçalho do terminal -->
+            <!-- Cabeçalho do terminal (oculto: as informações/ações do painel ativo
+                 agora ficam na barra única da janela) -->
             <Border x:Name="Header"
                     Grid.Row="0"
+                    Visibility="Collapsed"
                     Background="#111111"
                     BorderBrush="{StaticResource BorderSoftBrush}"
                     BorderThickness="0,0,0,1"

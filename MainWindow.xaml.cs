@@ -351,6 +351,7 @@ public partial class MainWindow : Window
         }
 
         UpdateTitle();
+        UpdateActivePaneChrome();
         if (focus) _active?.FocusTerminal();
     }
 
@@ -638,6 +639,7 @@ public partial class MainWindow : Window
         UpdateFooters();
         UpdateSleepGuard();
         UpdateTitle();
+        UpdateActivePaneChrome();
 
         _tray?.UpdateState(
             count,
@@ -647,6 +649,94 @@ public partial class MainWindow : Window
             count == 0
                 ? "StorageTerm · nenhum terminal aberto"
                 : $"StorageTerm · {count} terminal(is) · {connected} conectado(s)");
+    }
+
+    private void UpdateActivePaneChrome()
+    {
+        var pane = _active;
+        var visible = pane != null ? Visibility.Visible : Visibility.Collapsed;
+
+        ActivePaneGroup.Visibility = visible;
+        ActivePaneSeparator.Visibility = visible;
+        ActivePaneActions.Visibility = visible;
+        ActivePaneActionsSeparator.Visibility = visible;
+
+        if (pane == null) return;
+
+        ActiveIndexText.Text = $"#{pane.Index}";
+        ActiveHostText.Text = pane.IsDemo ? "shell local" : pane.Alias;
+        ActiveHostText.ToolTip = pane.ConnectionLabel;
+        ActiveStatusText.Text = pane.StatusLabel;
+
+        if (pane.IsDemo)
+        {
+            ActiveModeText.Text = "DEMO";
+            ActiveModeText.Foreground = (Brush)FindResource("PurpleBrush");
+            ActiveModeDot.Fill = (Brush)FindResource("PurpleBrush");
+            ActiveModeBadge.Background = DemoPillBg;
+            ActiveModeBadge.BorderBrush = DemoPillBorder;
+            ActiveModeBadge.ToolTip = "Modo demonstração (shell local)";
+        }
+        else if (pane.ResolvedMode == ConnectionMode.Lan)
+        {
+            ActiveModeText.Text = "LAN";
+            ActiveModeText.Foreground = (Brush)FindResource("GreenBrush");
+            ActiveModeDot.Fill = (Brush)FindResource("GreenBrush");
+            ActiveModeBadge.Background = LanPillBg;
+            ActiveModeBadge.BorderBrush = LanPillBorder;
+            ActiveModeBadge.ToolTip = $"Conexão LAN — {pane.ConnectionLabel}";
+        }
+        else
+        {
+            ActiveModeText.Text = "EXT";
+            ActiveModeText.Foreground = (Brush)FindResource("AmberBrush");
+            ActiveModeDot.Fill = (Brush)FindResource("AmberBrush");
+            ActiveModeBadge.Background = ExtPillBg;
+            ActiveModeBadge.BorderBrush = ExtPillBorder;
+            ActiveModeBadge.ToolTip = $"Conexão externa — {pane.ConnectionLabel}";
+        }
+
+        ActiveStatusDot.Fill = pane.Status switch
+        {
+            PaneStatus.Connected => (Brush)FindResource("GreenBrush"),
+            PaneStatus.Reconnecting or PaneStatus.Connecting => (Brush)FindResource("AmberBrush"),
+            PaneStatus.Disconnected => (Brush)FindResource("RedBrush"),
+            _ => (Brush)FindResource("TextMutedBrush")
+        };
+
+        ActiveReconnectButton.IsEnabled = !pane.IsDemo;
+        ActiveReconnectButton.ToolTip = pane.IsDemo
+            ? "Modo demonstração (shell local)"
+            : $"Reconectar {pane.Alias}";
+        ActivePaneMenuButton.ToolTip = $"Opções de {pane.Alias}";
+        ActiveCloseButton.ToolTip = $"Fechar {pane.Alias} (Ctrl+Q)";
+    }
+
+    private void ActiveReconnect_Click(object sender, RoutedEventArgs e)
+    {
+        if (_active is { IsDemo: false } pane)
+        {
+            _ = ReconnectPaneAsync(pane, manual: true);
+        }
+    }
+
+    private void ActivePaneMenu_Click(object sender, RoutedEventArgs e)
+    {
+        _active?.OpenPaneMenu(ActivePaneMenuButton);
+    }
+
+    private void ActiveModeBadge_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+        _active?.OpenPaneMenu(ActiveModeBadge);
+    }
+
+    private void ActiveClose_Click(object sender, RoutedEventArgs e)
+    {
+        if (_active is { } pane)
+        {
+            _ = ClosePaneAsync(pane);
+        }
     }
 
     private void UpdateModeIndicator()
