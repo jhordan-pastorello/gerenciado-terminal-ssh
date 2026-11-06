@@ -56,7 +56,21 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _connectivityTimer = new() { Interval = TimeSpan.FromSeconds(30) };
     private readonly DispatcherTimer _toastTimer = new() { Interval = TimeSpan.FromSeconds(3.5) };
     private readonly DispatcherTimer _updateTimer = new() { Interval = TimeSpan.FromHours(6) };
+    private readonly DispatcherTimer _branchTimer = new() { Interval = TimeSpan.FromSeconds(10) };
+    private readonly DispatcherTimer _hoverTimer = new() { Interval = TimeSpan.FromMilliseconds(180) };
     private readonly UpdateService _updateService = new();
+
+    private static readonly Color[] PaneColors =
+    {
+        Color.FromRgb(0x6E, 0xA8, 0xFE), // azul
+        Color.FromRgb(0xB6, 0x9C, 0xFF), // lilás
+        Color.FromRgb(0xF2, 0xB8, 0x80), // âmbar
+        Color.FromRgb(0xF2, 0x8B, 0xA8), // rosa
+        Color.FromRgb(0x7A, 0xD7, 0xF0), // ciano
+        Color.FromRgb(0xF4, 0x9E, 0x7A), // laranja
+        Color.FromRgb(0xA0, 0xA8, 0xFF), // índigo
+        Color.FromRgb(0xE0, 0xC2, 0x85), // areia
+    };
 
     private UpdateInfo? _pendingUpdate;
     private string? _pendingUpdateZip;
@@ -84,6 +98,7 @@ public partial class MainWindow : Window
     private bool _probeInFlight;
     private bool _balloonShown;
     private bool _startupComplete;
+    private bool _branchFetchInFlight;
 
     public MainWindow(AppSettings settings, StartupOptions startup)
     {
@@ -100,6 +115,10 @@ public partial class MainWindow : Window
             _toastTimer.Stop();
             FadeToast();
         };
+
+        _branchTimer.Tick += (_, _) => _ = RefreshBranchesAsync();
+        _hoverTimer.Tick += (_, _) => UpdateHoverFocus();
+        PaneScroller.SizeChanged += (_, _) => LayoutPanes();
 
         Loaded += MainWindow_Loaded;
         Closing += MainWindow_Closing;
@@ -139,6 +158,9 @@ public partial class MainWindow : Window
 
             _pollTimer.Start();
             _connectivityTimer.Start();
+            _branchTimer.Start();
+            _hoverTimer.Start();
+            _ = RefreshBranchesAsync();
             _updateTimer.Tick += (_, _) => _ = CheckForUpdatesAsync(manual: false);
             _updateTimer.Start();
             _ = InitialUpdateCheckAsync();
@@ -173,7 +195,7 @@ public partial class MainWindow : Window
 
     private async Task StartSessionsAsync()
     {
-        var requested = Math.Clamp(_startup.RequestedPanes, 1, AppSettings.MaxTerminals);
+        var requested = Math.Clamp(_startup.RequestedPanes, 1, AppSettings.MaxSessionSlots);
 
         if (_demo)
         {
@@ -220,12 +242,6 @@ public partial class MainWindow : Window
         if (_shuttingDown) return null;
 
         demo = demo || _demo;
-
-        if (_panes.Count >= AppSettings.MaxTerminals)
-        {
-            ShowToast("Limite de 6 terminais atingido. Feche um terminal para abrir outro.", error: true);
-            return null;
-        }
 
         ConnectionTarget target;
         string command;
@@ -284,7 +300,7 @@ public partial class MainWindow : Window
 
         WirePane(pane);
         _panes.Add(pane);
-        PaneHost.Children.Insert(0, pane);
+        PaneHost.Children.Add(pane);
         LayoutPanes();
         UpdateChrome();
 
@@ -293,6 +309,8 @@ public partial class MainWindow : Window
         var label = demo ? "shell local" : target.Alias;
         ShowToast($"Terminal {pane.Index} · {label} · {ModeLabel(target)}");
         Log.Info($"Terminal {pane.Index} criado: {command}");
+
+        _ = RefreshBranchesAfterDelayAsync();
 
         await Task.CompletedTask;
         return pane;
@@ -310,34 +328,155 @@ public partial class MainWindow : Window
 
     private int AllocateSessionSlot()
     {
-        for (var slot = 1; slot <= AppSettings.MaxTerminals; slot++)
-        {
-            if (_panes.All(p => p.SessionSlot != slot)) return slot;
-        }
-
-        return 1;
+        var slot = 1;
+        while (_panes.Any(p => p.SessionSlot == slot)) slot++;
+        return slot;
     }
 
     private void LayoutPanes()
     {
-        var tiles = LayoutEngine.Compute(_panes.Count);
+        if (_shuttingDown) return;
+
+        var viewportWidth = PaneScroller.ViewportWidth > 0
+            ? PaneScroller.ViewportWidth
+            : PaneScroller.ActualWidth;
+        var viewportHeight = PaneScroller.ViewportHeight > 0
+            ? PaneScroller.ViewportHeight
+            : PaneScroller.ActualHeight;
+
+        const double gap = 6;
+        var width = Math.Max(240, (viewportWidth - gap * 2) / 2);
+        var height = Math.Max(120, viewportHeight - gap);
 
         for (var i = 0; i < _panes.Count; i++)
         {
             var pane = _panes[i];
-            var tile = tiles[i];
-
-            Grid.SetRow(pane, tile.Row);
-            Grid.SetColumn(pane, tile.Column);
-            Grid.SetRowSpan(pane, tile.RowSpan);
-            Grid.SetColumnSpan(pane, tile.ColumnSpan);
-            pane.Margin = new Thickness(2);
-            pane.SetIndex(i + 1);
+            pane.Width = width;
+            pane.Height = height;
+            pane.Margin = new Thickness(gap / 2);
+            pane.HorizontalAlignment = HorizontalAlignment.Left;
+            pane.VerticalAlignment = VerticalAlignment.Top;
+            pane.SetIndex(pane.SessionSlot > 0 ? pane.SessionSlot : i + 1);
+            pane.SetAccentColor(GetPaneColor(pane.SessionSlot > 0 ? pane.SessionSlot : i + 1));
             pane.SetActive(pane == _active);
         }
 
         EmptyState.Visibility = _panes.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         if (_panes.Count == 0) EmptyActionButton.IsEnabled = true;
+
+        Dispatcher.BeginInvoke(new Action(ScrollToActivePane), DispatcherPriority.Loaded);
+    }
+
+    private static Color GetPaneColor(int index)
+    {
+        if (index <= 0) index = 1;
+        return PaneColors[(index - 1) % PaneColors.Length];
+    }
+
+    private async Task RefreshBranchesAfterDelayAsync()
+    {
+        try
+        {
+            await Task.Delay(2500);
+        }
+        catch
+        {
+            // ignore
+        }
+
+        await RefreshBranchesAsync();
+    }
+
+    private async Task RefreshBranchesAsync()
+    {
+        if (_branchFetchInFlight || _shuttingDown || !_settings.PersistentSession) return;
+
+        var panes = _panes.Where(p => !p.IsDemo && p.SessionSlot > 0).ToArray();
+        if (panes.Length == 0) return;
+
+        _branchFetchInFlight = true;
+        try
+        {
+            foreach (var group in panes.GroupBy(p => p.Alias))
+            {
+                var sessions = group
+                    .Select(p => $"storage-{p.SessionSlot}")
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+
+                var branches = await BranchService.FetchAsync(group.Key, sessions);
+                foreach (var pane in group)
+                {
+                    var key = $"storage-{pane.SessionSlot}";
+                    pane.SetBranch(branches.TryGetValue(key, out var branch) ? branch : "—");
+                }
+            }
+
+            UpdateActivePaneChrome();
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Falha ao atualizar branches: {ex.Message}");
+        }
+        finally
+        {
+            _branchFetchInFlight = false;
+        }
+    }
+
+    private void ScrollToActivePane()
+    {
+        if (_active == null || PaneScroller.ViewportWidth <= 0) return;
+
+        var left = _active.TranslatePoint(new Point(0, 0), PaneHost).X;
+        var right = left + _active.ActualWidth;
+        var offset = PaneScroller.HorizontalOffset;
+        var viewport = PaneScroller.ViewportWidth;
+
+        if (left < offset)
+        {
+            PaneScroller.ScrollToHorizontalOffset(Math.Max(0, left - 3));
+        }
+        else if (right > offset + viewport)
+        {
+            PaneScroller.ScrollToHorizontalOffset(right - viewport + 3);
+        }
+    }
+
+    private void PaneScroller_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if ((Keyboard.Modifiers & ModifierKeys.Shift) == 0) return;
+        PaneScroller.ScrollToHorizontalOffset(PaneScroller.HorizontalOffset - e.Delta);
+        e.Handled = true;
+    }
+
+    private void UpdateHoverFocus()
+    {
+        if (!IsActive || _shuttingDown || _panes.Count == 0 || WindowState == WindowState.Minimized)
+        {
+            return;
+        }
+
+        if (Mouse.Captured != null) return;
+
+        if (!GetCursorPos(out var cursor)) return;
+
+        var local = PaneHost.PointFromScreen(new Point(cursor.X, cursor.Y));
+        foreach (var pane in _panes)
+        {
+            if (pane.ActualWidth <= 0 || pane.ActualHeight <= 0) continue;
+
+            var topLeft = pane.TranslatePoint(new Point(0, 0), PaneHost);
+            var bounds = new Rect(topLeft, new Size(pane.ActualWidth, pane.ActualHeight));
+            if (!bounds.Contains(local)) continue;
+
+            if (_active != pane)
+            {
+                SetActivePane(pane, focus: true);
+            }
+
+            return;
+        }
     }
 
     private void SetActivePane(TerminalPane? pane, bool focus)
@@ -606,8 +745,8 @@ public partial class MainWindow : Window
         var reconnecting = _panes.Count(p => p.Status is PaneStatus.Reconnecting or PaneStatus.Connecting);
         var disconnected = _panes.Count(p => p.Status is PaneStatus.Disconnected or PaneStatus.Stopped);
 
-        CountText.Text = $"{count} / {AppSettings.MaxTerminals}";
-        NewButton.IsEnabled = count < AppSettings.MaxTerminals;
+        CountText.Text = count.ToString();
+        NewButton.IsEnabled = true;
 
         if (count == 0 && _startupComplete)
         {
@@ -664,8 +803,11 @@ public partial class MainWindow : Window
         if (pane == null) return;
 
         ActiveIndexText.Text = $"#{pane.Index}";
+        ActiveIndexText.Foreground = pane.AccentBrush;
         ActiveHostText.Text = pane.IsDemo ? "shell local" : pane.Alias;
         ActiveHostText.ToolTip = pane.ConnectionLabel;
+        ActiveBranchText.Text = $"branch: {pane.BranchTitle}";
+        ActiveBranchText.Foreground = pane.AccentBrush;
         ActiveStatusText.Text = pane.StatusLabel;
 
         if (pane.IsDemo)
@@ -1271,6 +1413,8 @@ public partial class MainWindow : Window
         _connectivityTimer.Stop();
         _toastTimer.Stop();
         _updateTimer.Stop();
+        _branchTimer.Stop();
+        _hoverTimer.Stop();
 
         UnregisterHotkeys();
 

@@ -11,10 +11,6 @@ namespace StorageTerm.Controls;
 
 public partial class TerminalPane : UserControl, IDisposable
 {
-    private static readonly Brush AccentBorder = Frozen("#9A9A9A");
-    private static readonly Brush IdleBorder = Frozen("#242424");
-    private static readonly Brush HeaderIdle = Frozen("#111111");
-    private static readonly Brush HeaderActive = Frozen("#1A1A1A");
     private static readonly Brush TextPrimary = Frozen("#EDEDED");
     private static readonly Brush HostInactive = Frozen("#A3A3A3");
     private static readonly Brush TextDim = Frozen("#A3A3A3");
@@ -23,6 +19,12 @@ public partial class TerminalPane : UserControl, IDisposable
     private static readonly Brush Amber = Frozen("#8F8F8F");
     private static readonly Brush Red = Frozen("#D18B8B");
     private static readonly Brush Purple = Frozen("#B0B0B0");
+    private static readonly Brush HeaderIdle = Frozen("#111111");
+    private static readonly Brush HeaderActive = Frozen("#1A1A1A");
+
+    private Brush _accentBrush = Frozen("#9A9A9A");
+    private Brush _idleBorderBrush = Frozen("#242424");
+    private bool _isActive;
 
     private MenuItem? _menuAuto;
     private MenuItem? _menuLan;
@@ -52,6 +54,9 @@ public partial class TerminalPane : UserControl, IDisposable
     public DateTime? ConnectedAt { get; private set; }
     public int ReconnectAttempts { get; set; }
     public bool IsClosed => _disposed;
+    public string BranchTitle { get; private set; } = "—";
+    public Brush AccentBrush => _accentBrush;
+    public Color AccentColor => ((SolidColorBrush)_accentBrush).Color;
 
     public TerminalPane()
     {
@@ -164,11 +169,25 @@ public partial class TerminalPane : UserControl, IDisposable
 
     public void SetActive(bool active)
     {
-        PaneBorder.BorderBrush = active ? AccentBorder : IdleBorder;
+        _isActive = active;
+        PaneBorder.BorderBrush = active ? _accentBrush : _idleBorderBrush;
         Header.Background = active ? HeaderActive : HeaderIdle;
-        ActiveBar.Background = active ? AccentBorder : Brushes.Transparent;
+        ActiveBar.Background = active ? _accentBrush : Brushes.Transparent;
         HostText.Foreground = active ? TextPrimary : HostInactive;
-        IndexText.Foreground = active ? AccentBorder : TextMuted;
+        IndexText.Foreground = active ? _accentBrush : TextMuted;
+    }
+
+    public void SetAccentColor(Color color)
+    {
+        _accentBrush = Frozen(color);
+        _idleBorderBrush = Frozen(Color.FromArgb(70, color.R, color.G, color.B));
+        ColorBar.Background = _accentBrush;
+        SetActive(_isActive);
+    }
+
+    public void SetBranch(string branch)
+    {
+        BranchTitle = string.IsNullOrWhiteSpace(branch) ? "—" : branch.Trim();
     }
 
     public void PollProcess()
@@ -621,6 +640,11 @@ public partial class TerminalPane : UserControl, IDisposable
     private static Brush Frozen(string hex)
     {
         var color = (Color)ColorConverter.ConvertFromString(hex);
+        return Frozen(color);
+    }
+
+    private static Brush Frozen(Color color)
+    {
         var brush = new SolidColorBrush(color);
         brush.Freeze();
         return brush;

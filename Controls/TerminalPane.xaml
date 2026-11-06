@@ -13,12 +13,17 @@
             PreviewMouseLeftButtonDown="PaneBorder_PreviewMouseLeftButtonDown">
         <Grid>
             <Grid.RowDefinitions>
-                <RowDefinition Height="0" />
+                <RowDefinition Height="3" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
-            <!-- Cabeçalho do terminal (oculto: as informações/ações do painel ativo
-                 agora ficam na barra única da janela) -->
+            <!-- Faixa de cor do terminal (identifica o agente) -->
+            <Border x:Name="ColorBar"
+                    Grid.Row="0"
+                    Background="#3A3A3A"
+                    SnapsToDevicePixels="True" />
+
+            <!-- Cabeçalho antigo (oculto: a barra única da janela mostra o painel ativo) -->
             <Border x:Name="Header"
                     Grid.Row="0"
                     Visibility="Collapsed"

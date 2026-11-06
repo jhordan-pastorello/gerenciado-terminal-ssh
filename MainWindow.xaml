@@ -74,6 +74,12 @@
                                FontFamily="{StaticResource MonoFont}" FontSize="10.5"
                                Foreground="{StaticResource TextBrush}"
                                VerticalAlignment="Center" />
+                    <TextBlock x:Name="ActiveBranchText" Text="branch: —"
+                               FontFamily="{StaticResource MonoFont}" FontSize="10"
+                               Foreground="{StaticResource TextDimBrush}"
+                               VerticalAlignment="Center" Margin="9,0,0,0"
+                               MaxWidth="260" TextTrimming="CharacterEllipsis"
+                               ToolTip="Branch do agente neste terminal" />
                     <Border x:Name="ActiveModeBadge"
                             Background="#1A1A1A" BorderBrush="#3A3A3A" BorderThickness="1"
                             CornerRadius="5" Padding="5,1" Margin="7,0,0,0"
@@ -145,8 +151,8 @@
 
                 <Border Grid.Column="6" Background="#111111" BorderBrush="{StaticResource BorderBrush}"
                         BorderThickness="1" CornerRadius="8" Padding="7,2"
-                        VerticalAlignment="Center" ToolTip="Máximo de 6 terminais">
-                    <TextBlock x:Name="CountText" Text="0 / 6" FontFamily="{StaticResource MonoFont}"
+                        VerticalAlignment="Center" ToolTip="Terminais abertos (sem limite)">
+                    <TextBlock x:Name="CountText" Text="0" FontFamily="{StaticResource MonoFont}"
                                FontSize="9.5" Foreground="{StaticResource TextDimBrush}" />
                 </Border>
 
@@ -171,23 +177,20 @@
             </Grid>
         </Border>
 
-        <!-- ===== Área dos terminais ===== -->
-        <Grid x:Name="PaneHost" Grid.Row="1" Background="{StaticResource BgBrush}" Margin="4">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-            <Grid.RowDefinitions>
-                <RowDefinition Height="*" />
-                <RowDefinition Height="*" />
-            </Grid.RowDefinitions>
+        <!-- ===== Carrossel horizontal: 2 terminais visíveis, novos à direita ===== -->
+        <Grid Grid.Row="1" Background="{StaticResource BgBrush}">
+            <ScrollViewer x:Name="PaneScroller"
+                          Margin="4,4,4,0"
+                          HorizontalScrollBarVisibility="Auto"
+                          VerticalScrollBarVisibility="Disabled"
+                          PanningMode="HorizontalOnly"
+                          PreviewMouseWheel="PaneScroller_PreviewMouseWheel"
+                          Background="{StaticResource BgBrush}">
+                <StackPanel x:Name="PaneHost" Orientation="Horizontal"
+                            Background="{StaticResource BgBrush}" />
+            </ScrollViewer>
 
-            <Border x:Name="EmptyState" Grid.Row="0" Grid.RowSpan="2" Grid.Column="0" Grid.ColumnSpan="6"
-                    Panel.ZIndex="50" Background="{StaticResource BgBrush}">
+            <Border x:Name="EmptyState" Panel.ZIndex="50" Background="{StaticResource BgBrush}">
                 <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460">
                     <TextBlock x:Name="EmptyTitle" Text="Conectando ao storage…"
                                FontFamily="{StaticResource DisplayFont}" FontSize="17" FontWeight="SemiBold"
@@ -211,7 +214,7 @@
                             <TextBlock Text="Ctrl+T" FontFamily="{StaticResource MonoFont}" FontSize="9"
                                        Foreground="{StaticResource TextDimBrush}" />
                         </Border>
-                        <TextBlock Text="abre outro terminal · máximo de 6" FontSize="9.5"
+                        <TextBlock Text="abre outro terminal · sem limite" FontSize="9.5"
                                    Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center" />
                     </StackPanel>
                 </StackPanel>

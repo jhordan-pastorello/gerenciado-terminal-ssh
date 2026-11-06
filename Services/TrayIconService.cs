@@ -134,10 +134,8 @@ public sealed class TrayIconService : IDisposable
     {
         try
         {
-            _newSessionItem.Text = panes >= AppSettings.MaxTerminals
-                ? "Nova sessão (limite de 6)"
-                : $"Nova sessão ({panes}/6)";
-            _newSessionItem.Enabled = panes < AppSettings.MaxTerminals;
+            _newSessionItem.Text = $"Nova sessão ({panes})";
+            _newSessionItem.Enabled = true;
 
             _keepAwakeItem.Checked = keepAwake;
             _startWithWindowsItem.Checked = startWithWindows;

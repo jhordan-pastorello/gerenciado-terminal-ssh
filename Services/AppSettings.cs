@@ -29,6 +29,7 @@ public static class AppPaths
 public sealed class AppSettings
 {
     public const int MaxTerminals = 6;
+    public const int MaxSessionSlots = 999;
 
     public ConnectionMode Mode { get; set; } = ConnectionMode.Auto;
 
