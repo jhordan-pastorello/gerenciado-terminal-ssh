@@ -18,6 +18,16 @@ public static class SshCommandBuilder
         }
     }
 
+    public static string ScpPath
+    {
+        get
+        {
+            var system = Environment.GetFolderPath(Environment.SpecialFolder.System);
+            var candidate = Path.Combine(system, "OpenSSH", "scp.exe");
+            return File.Exists(candidate) ? candidate : "scp.exe";
+        }
+    }
+
     public static bool IsValidAlias(string alias) =>
         !string.IsNullOrWhiteSpace(alias) && SafeAlias.IsMatch(alias.Trim());
 

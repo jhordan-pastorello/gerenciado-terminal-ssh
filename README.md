@@ -108,12 +108,23 @@ Os apps instalados passam a ver a `v1.0.1` e se atualizam sozinhos. A tag precis
 | `Ctrl+Shift+1` … `Ctrl+Shift+6` | Focar o terminal N |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Próximo / anterior |
 | `Ctrl+Shift+C` | Copiar a seleção |
-| `Ctrl+Shift+V` | Colar |
+| `Ctrl+V` | Colar texto ou imagem (imagem sobe via scp e o caminho remoto é colado) |
+| `Ctrl+Shift+V` | Colar apenas texto (alternativa) |
 | `F11` | Maximizar / restaurar |
 
 `AltGr` (Ctrl+Alt) **nunca é capturado**: o app compõe o caractere com o layout ABNT2 e envia direto ao PTY, então `/`, `?`, `°`, `!`, `@`, `#` funcionam inclusive dentro do tmux. `Ctrl+Q` só fecha o painel quando `Alt` **não** está pressionado; `Ctrl+Shift+W` é a alternativa.
 
 Os atalhos são registrados como *hotkeys* enquanto a janela está ativa. Isso faz `Ctrl+T` funcionar mesmo com o terminal nativo focado (dentro do SSH), sem enviar o atalho para o servidor.
+
+### Colar imagens
+
+`Ctrl+V` com uma imagem na área de transferência (print, imagem do navegador ou arquivo copiado no Explorer) faz o app:
+
+1. salvar a imagem localmente em PNG;
+2. enviar por `scp` para `~/storage-term-pastes/` no servidor;
+3. colar o **caminho absoluto remoto** no terminal.
+
+Isso funciona com agentes CLI que aceitam caminho de arquivo (Kiro, Claude Code, Codex etc.): cole a imagem e pressione **Enter** para o agente ler o arquivo. O envio usa a chave SSH do `~/.ssh/config`, então não pede senha. Se a área de transferência tiver só texto, `Ctrl+V` cola o texto normalmente; `Ctrl+Shift+V` continua funcionando como alternativa.
 
 ## Layouts
 

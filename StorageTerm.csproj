@@ -18,8 +18,8 @@
     <Description>Gerenciador de terminais SSH com layout inteligente para storage-lan / storage.</Description>
     <Company>StorageTerm</Company>
     <Copyright>Copyright © 2026</Copyright>
-    <Version>1.0.4</Version>
-    <FileVersion>1.0.4.0</FileVersion>
+    <Version>1.0.5</Version>
+    <FileVersion>1.0.5.0</FileVersion>
     <RepositoryUrl>https://github.com/jhordan-pastorello/gerenciado-terminal-ssh</RepositoryUrl>
     <PackageProjectUrl>https://github.com/jhordan-pastorello/gerenciado-terminal-ssh</PackageProjectUrl>
     <PublishSingleFile>false</PublishSingleFile>
@@ -28,6 +28,13 @@
     <TieredPGO>true</TieredPGO>
     <NoWarn>$(NoWarn);WFO0003</NoWarn>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Ferramentas auxiliares têm projetos próprios. -->
+    <Compile Remove="tools\**\*.cs" />
+    <None Remove="tools\**\*" />
+    <Page Remove="tools\**\*.xaml" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="WPF-UI.Terminal" Version="1.0.39" />

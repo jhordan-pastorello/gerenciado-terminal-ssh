@@ -339,13 +339,40 @@ public partial class TerminalPane : UserControl, IDisposable
         }
     }
 
-    public void PasteClipboard()
+    public void PasteClipboard() => _ = PasteClipboardAsync();
+
+    public async Task PasteClipboardAsync()
     {
         try
         {
+            // Imagem copiada (print, navegador, etc.).
+            if (System.Windows.Clipboard.ContainsImage())
+            {
+                var image = System.Windows.Clipboard.GetImage();
+                if (image != null)
+                {
+                    var localFile = ImagePasteService.SaveClipboardImage(image);
+                    await UploadImagesAndPasteAsync(new[] { localFile });
+                    return;
+                }
+            }
+
+            // Arquivos de imagem copiados no Explorer.
+            if (System.Windows.Clipboard.ContainsFileDropList())
+            {
+                var files = ImagePasteService.FilterImages(
+                    System.Windows.Clipboard.GetFileDropList().Cast<string>());
+
+                if (files.Count > 0)
+                {
+                    await UploadImagesAndPasteAsync(files);
+                    return;
+                }
+            }
+
             if (!System.Windows.Clipboard.ContainsText())
             {
-                Notification?.Invoke(this, "A área de transferência não contém texto.");
+                Notification?.Invoke(this, "A área de transferência não contém texto ou imagem.");
                 return;
             }
 
@@ -358,6 +385,32 @@ public partial class TerminalPane : UserControl, IDisposable
         {
             Log.Warn($"Falha ao colar: {ex.Message}");
             Notification?.Invoke(this, "Não foi possível ler a área de transferência.");
+        }
+    }
+
+    private async Task UploadImagesAndPasteAsync(IReadOnlyList<string> localFiles)
+    {
+        if (IsDemo)
+        {
+            Notification?.Invoke(this, "Modo demonstração: envio de imagem indisponível.");
+            return;
+        }
+
+        try
+        {
+            Notification?.Invoke(this, "Enviando imagem para o servidor…");
+            var remotePaths = await ImagePasteService.UploadAsync(Alias, localFiles);
+            var text = string.Join(" ", remotePaths);
+
+            if (SendText(text))
+            {
+                Notification?.Invoke(this, $"Imagem enviada: {text}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Falha ao enviar imagem: {ex.Message}");
+            Notification?.Invoke(this, $"Não foi possível enviar a imagem: {ex.Message}");
         }
     }
 
@@ -437,7 +490,7 @@ public partial class TerminalPane : UserControl, IDisposable
         var copy = new MenuItem { Header = "Copiar seleção", InputGestureText = "Ctrl+Shift+C" };
         copy.Click += (_, _) => CopySelection();
 
-        var paste = new MenuItem { Header = "Colar", InputGestureText = "Ctrl+Shift+V" };
+        var paste = new MenuItem { Header = "Colar", InputGestureText = "Ctrl+V" };
         paste.Click += (_, _) => PasteClipboard();
 
         var clear = new MenuItem { Header = "Limpar tela (visual)" };

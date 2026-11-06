@@ -1266,6 +1266,13 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (ctrl && !shift && !alt && e.Key == Key.V)
+        {
+            e.Handled = true;
+            _active?.PasteClipboard();
+            return;
+        }
+
         if (ctrl && shift && !alt && e.Key == Key.Q)
         {
             e.Handled = true;
@@ -1453,6 +1460,14 @@ public partial class MainWindow : Window
             if (ctrl && !alt && !shift && info.vkCode == 0x51)
             {
                 _ = Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(CloseActivePane));
+                return (IntPtr)1;
+            }
+
+            // Ctrl+V cola texto ou imagem (imagem sobe por scp e cola o caminho).
+            // Ctrl+Shift+V continua no hotkey antigo.
+            if (ctrl && !alt && !shift && info.vkCode == 0x56)
+            {
+                _ = Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() => _active?.PasteClipboard()));
                 return (IntPtr)1;
             }
 
