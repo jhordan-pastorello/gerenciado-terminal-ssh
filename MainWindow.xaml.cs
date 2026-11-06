@@ -28,8 +28,11 @@ public partial class MainWindow : Window
     private const int HotkeyPaste = 1006;
     private const int HotkeyMaximize = 1007;
     private const int HotkeyCloseQ = 1008;
+    private const int HotkeyScrollPrev = 1009;
+    private const int HotkeyScrollNext = 1010;
     private const int HotkeyPaneBase = 1100;
 
+    private const uint ModAlt = 0x0001;
     private const uint ModControl = 0x0002;
     private const uint ModShift = 0x0004;
     private const uint ModNoRepeat = 0x4000;
@@ -119,6 +122,8 @@ public partial class MainWindow : Window
         _branchTimer.Tick += (_, _) => _ = RefreshBranchesAsync();
         _hoverTimer.Tick += (_, _) => UpdateHoverFocus();
         PaneScroller.SizeChanged += (_, _) => LayoutPanes();
+        SizeChanged += (_, _) => LayoutPanes();
+        StateChanged += (_, _) => LayoutPanes();
 
         Loaded += MainWindow_Loaded;
         Closing += MainWindow_Closing;
@@ -337,16 +342,15 @@ public partial class MainWindow : Window
     {
         if (_shuttingDown) return;
 
-        var viewportWidth = PaneScroller.ViewportWidth > 0
-            ? PaneScroller.ViewportWidth
-            : PaneScroller.ActualWidth;
-        var viewportHeight = PaneScroller.ViewportHeight > 0
-            ? PaneScroller.ViewportHeight
-            : PaneScroller.ActualHeight;
+        var viewportWidth = PaneScroller.ActualWidth;
+        var viewportHeight = PaneScroller.ActualHeight;
+        if (viewportWidth <= 0 || viewportHeight <= 0) return;
 
         const double gap = 6;
+        const double scrollBarHeight = 5;
         var width = Math.Max(240, (viewportWidth - gap * 2) / 2);
-        var height = Math.Max(120, viewportHeight - gap);
+        var reserved = _panes.Count > 2 ? scrollBarHeight : 0;
+        var height = Math.Max(120, viewportHeight - gap - reserved);
 
         for (var i = 0; i < _panes.Count; i++)
         {
@@ -364,7 +368,7 @@ public partial class MainWindow : Window
         EmptyState.Visibility = _panes.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         if (_panes.Count == 0) EmptyActionButton.IsEnabled = true;
 
-        Dispatcher.BeginInvoke(new Action(ScrollToActivePane), DispatcherPriority.Loaded);
+        Dispatcher.BeginInvoke(new Action(ScrollToActivePane), DispatcherPriority.ContextIdle);
     }
 
     private static Color GetPaneColor(int index)
@@ -408,7 +412,14 @@ public partial class MainWindow : Window
                 foreach (var pane in group)
                 {
                     var key = $"storage-{pane.SessionSlot}";
-                    pane.SetBranch(branches.TryGetValue(key, out var branch) ? branch : "—");
+                    if (branches.TryGetValue(key, out var info))
+                    {
+                        pane.SetBranch(info.Label, info.IsGit);
+                    }
+                    else
+                    {
+                        pane.SetBranch("—", isGit: false);
+                    }
                 }
             }
 
@@ -427,6 +438,12 @@ public partial class MainWindow : Window
     private void ScrollToActivePane()
     {
         if (_active == null || PaneScroller.ViewportWidth <= 0) return;
+
+        if (_panes.Count > 0 && ReferenceEquals(_active, _panes[^1]))
+        {
+            PaneScroller.ScrollToRightEnd();
+            return;
+        }
 
         var left = _active.TranslatePoint(new Point(0, 0), PaneHost).X;
         var right = left + _active.ActualWidth;
@@ -456,8 +473,6 @@ public partial class MainWindow : Window
         {
             return;
         }
-
-        if (Mouse.Captured != null) return;
 
         if (!GetCursorPos(out var cursor)) return;
 
@@ -806,7 +821,7 @@ public partial class MainWindow : Window
         ActiveIndexText.Foreground = pane.AccentBrush;
         ActiveHostText.Text = pane.IsDemo ? "shell local" : pane.Alias;
         ActiveHostText.ToolTip = pane.ConnectionLabel;
-        ActiveBranchText.Text = $"branch: {pane.BranchTitle}";
+        ActiveBranchText.Text = $"{(pane.BranchIsGit ? "branch" : "pasta")}: {pane.BranchTitle}";
         ActiveBranchText.Foreground = pane.AccentBrush;
         ActiveStatusText.Text = pane.StatusLabel;
 
@@ -1537,6 +1552,15 @@ public partial class MainWindow : Window
         SetActivePane(_panes[next], focus: true);
     }
 
+    private void ScrollCarousel(int direction)
+    {
+        if (_panes.Count <= 2) return;
+
+        var step = Math.Max(220, PaneScroller.ViewportWidth / 2);
+        var target = PaneScroller.HorizontalOffset + direction * step;
+        PaneScroller.ScrollToHorizontalOffset(Math.Clamp(target, 0, PaneScroller.ScrollableWidth));
+    }
+
     private void FocusPane(int index)
     {
         if (index >= 0 && index < _panes.Count)
@@ -1590,6 +1614,8 @@ public partial class MainWindow : Window
         Register(HotkeyPaste, ModControl | ModShift, Key.V);
         Register(HotkeyMaximize, 0, Key.F11);
         Register(HotkeyCloseQ, ModControl | ModShift, Key.Q);
+        Register(HotkeyScrollPrev, ModAlt, Key.PageUp);
+        Register(HotkeyScrollNext, ModAlt, Key.PageDown);
 
         for (var i = 0; i < AppSettings.MaxTerminals; i++)
         {
@@ -1640,6 +1666,8 @@ public partial class MainWindow : Window
         UnregisterHotKey(_hwnd, HotkeyPaste);
         UnregisterHotKey(_hwnd, HotkeyMaximize);
         UnregisterHotKey(_hwnd, HotkeyCloseQ);
+        UnregisterHotKey(_hwnd, HotkeyScrollPrev);
+        UnregisterHotKey(_hwnd, HotkeyScrollNext);
 
         if (_keyboardHook != IntPtr.Zero)
         {
@@ -1796,6 +1824,12 @@ public partial class MainWindow : Window
                 break;
             case HotkeyCloseQ:
                 CloseActivePane();
+                break;
+            case HotkeyScrollPrev:
+                ScrollCarousel(-1);
+                break;
+            case HotkeyScrollNext:
+                ScrollCarousel(1);
                 break;
             default:
                 if (id >= HotkeyPaneBase && id < HotkeyPaneBase + AppSettings.MaxTerminals)

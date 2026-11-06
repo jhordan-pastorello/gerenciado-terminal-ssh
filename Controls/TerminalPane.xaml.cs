@@ -55,6 +55,7 @@ public partial class TerminalPane : UserControl, IDisposable
     public int ReconnectAttempts { get; set; }
     public bool IsClosed => _disposed;
     public string BranchTitle { get; private set; } = "—";
+    public bool BranchIsGit { get; private set; } = true;
     public Brush AccentBrush => _accentBrush;
     public Color AccentColor => ((SolidColorBrush)_accentBrush).Color;
 
@@ -185,9 +186,10 @@ public partial class TerminalPane : UserControl, IDisposable
         SetActive(_isActive);
     }
 
-    public void SetBranch(string branch)
+    public void SetBranch(string branch, bool isGit = true)
     {
         BranchTitle = string.IsNullOrWhiteSpace(branch) ? "—" : branch.Trim();
+        BranchIsGit = isGit;
     }
 
     public void PollProcess()

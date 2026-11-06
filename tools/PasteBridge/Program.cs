@@ -109,6 +109,8 @@ internal sealed class BridgeContext : ApplicationContext
     private const int VkRMenu = 0xA5;
     private const int VkV = 0x56;
     private const int VkReturn = 0x0D;
+    private const int VkPageUp = 0x21;
+    private const int VkPageDown = 0x22;
     private const uint InputKeyboard = 1;
     private const uint KeyeventfKeyup = 0x0002;
     private const uint KeyeventfUnicode = 0x0004;
@@ -128,6 +130,7 @@ internal sealed class BridgeContext : ApplicationContext
     private IntPtr _targetHwnd;
     private long _lastPidRefresh;
     private long _lastVersionCheck;
+    private int _hwheelAccumulator;
 
     public BridgeContext()
     {
@@ -181,15 +184,24 @@ internal sealed class BridgeContext : ApplicationContext
         if (nCode >= 0 && (wParam == (IntPtr)WmMouseWheel || wParam == (IntPtr)WmMouseHWheel))
         {
             var info = Marshal.PtrToStructure<MsllHookStruct>(lParam);
-            if (_instance != null && wParam == (IntPtr)WmMouseWheel)
+            if (_instance != null)
             {
-                var hwnd = _instance.FindTerminalForWheel(info.Point);
-                if (hwnd != IntPtr.Zero)
+                if (wParam == (IntPtr)WmMouseWheel)
+                {
+                    var hwnd = _instance.FindTerminalForWheel(info.Point);
+                    if (hwnd != IntPtr.Zero)
+                    {
+                        var delta = (short)(info.MouseData >> 16);
+                        var wheelParam = (IntPtr)((delta & 0xFFFF) << 16);
+                        var positionParam = (IntPtr)((info.Point.X & 0xFFFF) | ((info.Point.Y & 0xFFFF) << 16));
+                        SendMessage(hwnd, WmMouseWheel, wheelParam, positionParam);
+                        return (IntPtr)1;
+                    }
+                }
+                else if (wParam == (IntPtr)WmMouseHWheel && _instance.IsTargetForeground())
                 {
                     var delta = (short)(info.MouseData >> 16);
-                    var wheelParam = (IntPtr)((delta & 0xFFFF) << 16);
-                    var positionParam = (IntPtr)((info.Point.X & 0xFFFF) | ((info.Point.Y & 0xFFFF) << 16));
-                    SendMessage(hwnd, WmMouseWheel, wheelParam, positionParam);
+                    _instance.HandleHorizontalWheel(delta);
                     return (IntPtr)1;
                 }
             }
@@ -399,6 +411,25 @@ internal sealed class BridgeContext : ApplicationContext
             Log($"Falha ao enviar imagem: {ex.Message}");
             SystemSounds.Hand.Play();
         }
+    }
+
+    private void HandleHorizontalWheel(int delta)
+    {
+        _hwheelAccumulator += delta;
+        while (Math.Abs(_hwheelAccumulator) >= 120)
+        {
+            var direction = Math.Sign(_hwheelAccumulator);
+            SendAltPage(direction > 0 ? VkPageDown : VkPageUp);
+            _hwheelAccumulator -= direction * 120;
+        }
+    }
+
+    private static void SendAltPage(int virtualKey)
+    {
+        keybd_event(VkMenu, 0, 0, UIntPtr.Zero);
+        keybd_event((byte)virtualKey, 0, 0, UIntPtr.Zero);
+        keybd_event((byte)virtualKey, 0, 2, UIntPtr.Zero);
+        keybd_event(VkMenu, 0, 2, UIntPtr.Zero);
     }
 
     private void PasteTextDirect()
