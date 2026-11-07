@@ -482,6 +482,8 @@ public partial class MainWindow : Window
         if (!GetCursorPos(out var cursor)) return;
 
         var local = PaneHost.PointFromScreen(new Point(cursor.X, cursor.Y));
+        TerminalPane? hovered = null;
+
         foreach (var pane in _panes)
         {
             if (pane.ActualWidth <= 0 || pane.ActualHeight <= 0) continue;
@@ -490,12 +492,22 @@ public partial class MainWindow : Window
             var bounds = new Rect(topLeft, new Size(pane.ActualWidth, pane.ActualHeight));
             if (!bounds.Contains(local)) continue;
 
-            if (_active != pane)
-            {
-                SetActivePane(pane, focus: true);
-            }
+            hovered = pane;
+            break;
+        }
 
-            return;
+        if (hovered != null)
+        {
+            if (_active != hovered)
+            {
+                SetActivePane(hovered, focus: true);
+            }
+            else if (!hovered.HasNativeFocus)
+            {
+                // Se o foco ficou na barra/ScrollViewer, devolve as setas ao
+                // terminal nativo da sessão.
+                hovered.FocusTerminal();
+            }
         }
     }
 

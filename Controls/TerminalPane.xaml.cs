@@ -1,7 +1,10 @@
 ﻿using System.Runtime.InteropServices;
+using System.Reflection;
+using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
 using StorageTerm.Models;
@@ -58,6 +61,14 @@ public partial class TerminalPane : UserControl, IDisposable
     public bool BranchIsGit { get; private set; } = true;
     public Brush AccentBrush => _accentBrush;
     public Color AccentColor => ((SolidColorBrush)_accentBrush).Color;
+    public bool HasNativeFocus
+    {
+        get
+        {
+            var native = GetNativeTerminalHandle();
+            return native != IntPtr.Zero && GetFocus() == native;
+        }
+    }
 
     public TerminalPane()
     {
@@ -271,21 +282,8 @@ public partial class TerminalPane : UserControl, IDisposable
                 Term.Terminal.Focus();
                 Keyboard.Focus(Term.Terminal);
 
-                if (PresentationSource.FromVisual(Term.Terminal) == null) return;
-
-                var topLeft = Term.Terminal.PointToScreen(new Point(0, 0));
-                var bottomRight = Term.Terminal.PointToScreen(
-                    new Point(Term.Terminal.ActualWidth, Term.Terminal.ActualHeight));
-
-                var center = new NativePoint
-                {
-                    X = (int)((topLeft.X + bottomRight.X) / 2),
-                    Y = (int)((topLeft.Y + bottomRight.Y) / 2)
-                };
-
-                // O terminal é um HWND nativo (HwndHost). O foco WPF sozinho não
-                // entrega o teclado ao ConPTY; precisamos focar o filho nativo.
-                var native = WindowFromPoint(center);
+                var native = GetNativeTerminalHandle();
+                if (native == IntPtr.Zero) native = FindNativeTerminal();
                 if (native != IntPtr.Zero)
                 {
                     SetFocus(native);
@@ -296,6 +294,84 @@ public partial class TerminalPane : UserControl, IDisposable
                 Log.Warn($"Falha ao focar terminal: {ex.Message}");
             }
         });
+    }
+
+    private IntPtr GetNativeTerminalHandle()
+    {
+        try
+        {
+            var control = Term.Terminal;
+            var field = control.GetType().GetField(
+                "termContainer",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            var container = field?.GetValue(control);
+            if (container == null) return IntPtr.Zero;
+
+            var property = container.GetType().GetProperty(
+                "Hwnd",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            return property?.GetValue(container) is IntPtr hwnd ? hwnd : IntPtr.Zero;
+        }
+        catch
+        {
+            return IntPtr.Zero;
+        }
+    }
+
+    private IntPtr FindNativeTerminal()
+    {
+        if (PresentationSource.FromVisual(Term.Terminal) == null) return IntPtr.Zero;
+
+        var topLeft = Term.Terminal.PointToScreen(new Point(0, 0));
+        var bottomRight = Term.Terminal.PointToScreen(
+            new Point(Term.Terminal.ActualWidth, Term.Terminal.ActualHeight));
+
+        var point = new NativePoint
+        {
+            X = (int)((topLeft.X + bottomRight.X) / 2),
+            Y = (int)((topLeft.Y + bottomRight.Y) / 2)
+        };
+
+        // Usa a posição do mouse quando ele está dentro do painel: o centro de
+        // um painel parcialmente visível pode estar fora do viewport.
+        if (GetCursorPos(out var cursor) &&
+            cursor.X >= topLeft.X && cursor.X <= bottomRight.X &&
+            cursor.Y >= topLeft.Y && cursor.Y <= bottomRight.Y)
+        {
+            point = cursor;
+        }
+
+        var hit = WindowFromPoint(point);
+        if (IsTerminalWindow(hit)) return hit;
+
+        var window = Window.GetWindow(this);
+        if (window == null) return hit;
+
+        var root = new WindowInteropHelper(window).Handle;
+        var found = IntPtr.Zero;
+        EnumChildWindows(root, (hwnd, _) =>
+        {
+            if (!IsTerminalWindow(hwnd)) return true;
+            if (!GetWindowRect(hwnd, out var rect)) return true;
+            if (point.X < rect.Left || point.X >= rect.Right ||
+                point.Y < rect.Top || point.Y >= rect.Bottom)
+            {
+                return true;
+            }
+
+            found = hwnd;
+            return false;
+        }, IntPtr.Zero);
+
+        return found != IntPtr.Zero ? found : hit;
+    }
+
+    private static bool IsTerminalWindow(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero) return false;
+        var name = new StringBuilder(128);
+        GetClassName(hwnd, name, name.Capacity);
+        return name.ToString().Equals("HwndTerminalClass", StringComparison.OrdinalIgnoreCase);
     }
 
     public void ApplyAppearance(string fontFamily, double fontSize)
@@ -633,11 +709,37 @@ public partial class TerminalPane : UserControl, IDisposable
         public int Y;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
     [DllImport("user32.dll")]
     private static extern IntPtr WindowFromPoint(NativePoint point);
 
     [DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out NativePoint point);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumChildWindows(IntPtr parent, EnumWindowsProc callback, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hWnd, out NativeRect rect);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetClassName(IntPtr hWnd, StringBuilder className, int maxCount);
+
+    [DllImport("user32.dll")]
     private static extern IntPtr SetFocus(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetFocus();
 
     private static Brush Frozen(string hex)
     {

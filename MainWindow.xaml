@@ -185,6 +185,7 @@
                           VerticalScrollBarVisibility="Disabled"
                           PanningMode="HorizontalOnly"
                           PreviewMouseWheel="PaneScroller_PreviewMouseWheel"
+                          Focusable="False" IsTabStop="False"
                           Background="{StaticResource BgBrush}">
                 <StackPanel x:Name="PaneHost" Orientation="Horizontal"
                             Background="{StaticResource BgBrush}" />
