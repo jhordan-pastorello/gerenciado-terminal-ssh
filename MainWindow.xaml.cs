@@ -105,6 +105,13 @@ public partial class MainWindow : Window
     private bool _branchFetchInFlight;
     private bool _scrollAnimating;
     private double _scrollTarget;
+    private double _scrollStartOffset;
+    private DateTime _scrollStartTime;
+    private double _carouselStep;
+    private DateTime _hoverSuppressedUntil;
+    private readonly DispatcherTimer _snapTimer = new() { Interval = TimeSpan.FromMilliseconds(180) };
+
+    private const double ScrollDurationMs = 240;
 
     public MainWindow(AppSettings settings, StartupOptions startup)
     {
@@ -125,6 +132,12 @@ public partial class MainWindow : Window
         _branchTimer.Tick += (_, _) => _ = RefreshBranchesAsync();
         _hoverTimer.Tick += (_, _) => UpdateHoverFocus();
         _scrollAnimTimer.Tick += (_, _) => AnimateScroll();
+        _snapTimer.Tick += (_, _) =>
+        {
+            _snapTimer.Stop();
+            SnapToNearestPage();
+        };
+        PaneScroller.ScrollChanged += PaneScroller_ScrollChanged;
         PaneScroller.SizeChanged += (_, _) => LayoutPanes();
         SizeChanged += (_, _) => LayoutPanes();
         StateChanged += (_, _) => LayoutPanes();
@@ -355,6 +368,7 @@ public partial class MainWindow : Window
         var width = Math.Max(240, (viewportWidth - gap * 2) / 2);
         var reserved = _panes.Count > 2 ? scrollBarHeight : 0;
         var height = Math.Max(120, viewportHeight - gap - reserved);
+        _carouselStep = width + gap;
 
         for (var i = 0; i < _panes.Count; i++)
         {
@@ -372,7 +386,11 @@ public partial class MainWindow : Window
         EmptyState.Visibility = _panes.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         if (_panes.Count == 0) EmptyActionButton.IsEnabled = true;
 
-        Dispatcher.BeginInvoke(new Action(ScrollToActivePane), DispatcherPriority.ContextIdle);
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            ScrollToActivePane();
+            if (!_scrollAnimating) SnapToNearestPage();
+        }), DispatcherPriority.ContextIdle);
     }
 
     private static Color GetPaneColor(int index)
@@ -441,34 +459,24 @@ public partial class MainWindow : Window
 
     private void ScrollToActivePane()
     {
-        if (_active == null || PaneScroller.ViewportWidth <= 0) return;
-
-        if (_panes.Count > 0 && ReferenceEquals(_active, _panes[^1]))
-        {
-            SmoothScrollTo(PaneScroller.ScrollableWidth);
-            return;
-        }
+        if (_active == null || _panes.Count == 0 || PaneScroller.ViewportWidth <= 0) return;
 
         var left = _active.TranslatePoint(new Point(0, 0), PaneHost).X;
         var right = left + _active.ActualWidth;
         var offset = PaneScroller.HorizontalOffset;
         var viewport = PaneScroller.ViewportWidth;
 
-        if (left < offset)
-        {
-            SmoothScrollTo(Math.Max(0, left - 3));
-        }
-        else if (right > offset + viewport)
-        {
-            SmoothScrollTo(right - viewport + 3);
-        }
+        if (left >= offset && right <= offset + viewport) return;
+
+        var index = _panes.IndexOf(_active);
+        var maxStart = Math.Max(0, _panes.Count - 2);
+        ScrollToPage(Math.Clamp(index, 0, maxStart));
     }
 
     private void PaneScroller_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
         if ((Keyboard.Modifiers & ModifierKeys.Shift) == 0) return;
-        var baseOffset = _scrollAnimating ? _scrollTarget : PaneScroller.HorizontalOffset;
-        SmoothScrollTo(baseOffset - e.Delta * 0.6);
+        ScrollCarousel(e.Delta > 0 ? -1 : 1);
         e.Handled = true;
     }
 
@@ -495,6 +503,10 @@ public partial class MainWindow : Window
         {
             return;
         }
+
+        // Durante a rolagem, o painel sob o cursor muda a cada frame; não
+        // deixe a cor/foco oscilar. Volta a seguir o mouse após a animação.
+        if (_scrollAnimating || DateTime.UtcNow < _hoverSuppressedUntil) return;
 
         var hovered = FindPaneAtCursor();
         if (hovered != null)
@@ -1449,6 +1461,7 @@ public partial class MainWindow : Window
         _branchTimer.Stop();
         _hoverTimer.Stop();
         _scrollAnimTimer.Stop();
+        _snapTimer.Stop();
 
         UnregisterHotkeys();
 
@@ -1573,18 +1586,43 @@ public partial class MainWindow : Window
 
     private void ScrollCarousel(int direction)
     {
-        if (_panes.Count <= 2) return;
+        if (_panes.Count <= 2 || _scrollAnimating) return;
 
-        var baseOffset = _scrollAnimating ? _scrollTarget : PaneScroller.HorizontalOffset;
-        var step = Math.Max(120, PaneScroller.ViewportWidth * 0.10);
-        SmoothScrollTo(baseOffset + direction * step);
+        var step = _carouselStep > 0
+            ? _carouselStep
+            : Math.Max(240, PaneScroller.ViewportWidth / 2);
+
+        var index = (int)Math.Round(PaneScroller.HorizontalOffset / step);
+        var maxStart = Math.Max(0, _panes.Count - 2);
+        ScrollToPage(Math.Clamp(index + direction, 0, maxStart));
     }
 
-    private void SmoothScrollTo(double target)
+    private void ScrollToPage(int index)
     {
-        _scrollTarget = Math.Clamp(target, 0, Math.Max(0, PaneScroller.ScrollableWidth));
-        if (_scrollAnimating) return;
+        if (_panes.Count == 0) return;
 
+        var maxStart = Math.Max(0, _panes.Count - 2);
+        index = Math.Clamp(index, 0, maxStart);
+
+        var left = _panes[index].TranslatePoint(new Point(0, 0), PaneHost).X - 3;
+        _hoverSuppressedUntil = DateTime.UtcNow.AddMilliseconds(380);
+        StartScroll(left);
+    }
+
+    private void StartScroll(double target)
+    {
+        target = Math.Clamp(target, 0, Math.Max(0, PaneScroller.ScrollableWidth));
+        var current = PaneScroller.HorizontalOffset;
+
+        if (Math.Abs(target - current) < 0.5)
+        {
+            PaneScroller.ScrollToHorizontalOffset(target);
+            return;
+        }
+
+        _scrollStartOffset = current;
+        _scrollTarget = target;
+        _scrollStartTime = DateTime.UtcNow;
         _scrollAnimating = true;
         _scrollAnimTimer.Start();
     }
@@ -1593,26 +1631,46 @@ public partial class MainWindow : Window
     {
         if (!_scrollAnimating) return;
 
-        var current = PaneScroller.HorizontalOffset;
-        var difference = _scrollTarget - current;
+        var elapsed = (DateTime.UtcNow - _scrollStartTime).TotalMilliseconds;
+        var t = Math.Clamp(elapsed / ScrollDurationMs, 0, 1);
+        var eased = t < 0.5
+            ? 4 * t * t * t
+            : 1 - Math.Pow(-2 * t + 2, 3) / 2;
 
-        if (Math.Abs(difference) < 0.8)
+        var value = _scrollStartOffset + (_scrollTarget - _scrollStartOffset) * eased;
+        PaneScroller.ScrollToHorizontalOffset(value);
+
+        if (t >= 1)
         {
-            PaneScroller.ScrollToHorizontalOffset(_scrollTarget);
             _scrollAnimating = false;
             _scrollAnimTimer.Stop();
+        }
+    }
+
+    private void SnapToNearestPage()
+    {
+        if (_panes.Count <= 2)
+        {
+            if (PaneScroller.HorizontalOffset > 0.5) StartScroll(0);
             return;
         }
 
-        // Velocidade limitada: evita o "salto" quando o alvo está longe.
-        var movement = difference * 0.12;
-        const double maxStep = 12;
-        if (Math.Abs(movement) > maxStep)
-        {
-            movement = Math.Sign(movement) * maxStep;
-        }
+        var step = _carouselStep > 0
+            ? _carouselStep
+            : Math.Max(240, PaneScroller.ViewportWidth / 2);
 
-        PaneScroller.ScrollToHorizontalOffset(current + movement);
+        var index = (int)Math.Round(PaneScroller.HorizontalOffset / step);
+        var maxStart = Math.Max(0, _panes.Count - 2);
+        ScrollToPage(Math.Clamp(index, 0, maxStart));
+    }
+
+    private void PaneScroller_ScrollChanged(object sender, ScrollChangedEventArgs e)
+    {
+        if (_scrollAnimating || e.HorizontalChange == 0) return;
+
+        _hoverSuppressedUntil = DateTime.UtcNow.AddMilliseconds(250);
+        _snapTimer.Stop();
+        _snapTimer.Start();
     }
 
     private void FocusPane(int index)
