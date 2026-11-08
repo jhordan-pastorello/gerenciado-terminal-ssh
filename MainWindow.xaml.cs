@@ -110,6 +110,10 @@ public partial class MainWindow : Window
     private double _carouselStep;
     private DateTime _hoverSuppressedUntil;
     private readonly DispatcherTimer _snapTimer = new() { Interval = TimeSpan.FromMilliseconds(180) };
+    private readonly DispatcherTimer _arrowTimer = new() { Interval = TimeSpan.FromMilliseconds(35) };
+    private TerminalPane? _arrowPane;
+    private string _arrowKey = string.Empty;
+    private int _arrowRepeat;
 
     private const double ScrollDurationMs = 480;
 
@@ -137,6 +141,7 @@ public partial class MainWindow : Window
             _snapTimer.Stop();
             SnapToNearestPage();
         };
+        _arrowTimer.Tick += (_, _) => FlushArrow();
         PaneScroller.ScrollChanged += PaneScroller_ScrollChanged;
         PaneScroller.SizeChanged += (_, _) => LayoutPanes();
         SizeChanged += (_, _) => LayoutPanes();
@@ -1462,6 +1467,7 @@ public partial class MainWindow : Window
         _hoverTimer.Stop();
         _scrollAnimTimer.Stop();
         _snapTimer.Stop();
+        _arrowTimer.Stop();
 
         UnregisterHotkeys();
 
@@ -1582,6 +1588,21 @@ public partial class MainWindow : Window
         var current = _active == null ? -1 : _panes.IndexOf(_active);
         var next = (current + delta + _panes.Count) % _panes.Count;
         SetActivePane(_panes[next], focus: true);
+    }
+
+    private void FlushArrow()
+    {
+        _arrowTimer.Stop();
+
+        var pane = _arrowPane;
+        var key = _arrowKey;
+        var repeat = _arrowRepeat;
+        _arrowPane = null;
+        _arrowKey = string.Empty;
+        _arrowRepeat = 0;
+
+        if (pane == null || key.Length == 0) return;
+        _ = TmuxKeyService.SendAsync(pane.Alias, pane.SessionSlot, key, repeat);
     }
 
     private void ScrollCarousel(int direction)
@@ -1832,6 +1853,51 @@ public partial class MainWindow : Window
                       (GetAsyncKeyState(0xA5) & 0x8000) != 0 || // right Alt (AltGr)
                       (GetAsyncKeyState(VkMenu) & 0x8000) != 0;
             var shift = (GetAsyncKeyState(VkShift) & 0x8000) != 0;
+
+            // Setas em sessão tmux: o ConPTY/TUI às vezes não recebe o keydown.
+            // Envia pelo próprio tmux, que entrega ao agente/menu. O alvo é o
+            // painel sob o mouse; se o mouse não estiver em um painel, usa o ativo.
+            if (!ctrl && !alt && !shift &&
+                info.vkCode is >= 0x25 and <= 0x28 &&
+                _settings.PersistentSession)
+            {
+                var arrowPane = FindPaneAtCursor() ?? _active;
+                if (arrowPane is { IsDemo: false, SessionSlot: > 0 })
+                {
+                    if (arrowPane != _active)
+                    {
+                        SetActivePane(arrowPane, focus: true);
+                    }
+
+                    var key = info.vkCode switch
+                    {
+                        0x25 => "Left",
+                        0x26 => "Up",
+                        0x27 => "Right",
+                        0x28 => "Down",
+                        _ => string.Empty
+                    };
+
+                    if (key.Length > 0)
+                    {
+                        if (_arrowPane == arrowPane && _arrowKey == key)
+                        {
+                            _arrowRepeat++;
+                        }
+                        else
+                        {
+                            FlushArrow();
+                            _arrowPane = arrowPane;
+                            _arrowKey = key;
+                            _arrowRepeat = 1;
+                        }
+
+                        _arrowTimer.Stop();
+                        _arrowTimer.Start();
+                        return (IntPtr)1;
+                    }
+                }
+            }
 
             // Ctrl+Q sem Alt fecha o terminal ativo. AltGr+Q (Ctrl+Alt+Q)
             // continua digitando "/" e nunca cai neste bloco.
