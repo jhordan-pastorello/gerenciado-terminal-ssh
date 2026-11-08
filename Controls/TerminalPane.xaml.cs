@@ -1,6 +1,7 @@
 ﻿using System.Runtime.InteropServices;
 using System.Reflection;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -34,6 +35,8 @@ public partial class TerminalPane : UserControl, IDisposable
     private MenuItem? _menuExternal;
     private SshProfile? _profile;
     private bool _disposed;
+    private static readonly Regex TerminalResponse =
+        new(@"\x1b\[[?>][0-9;]*c", RegexOptions.Compiled);
 
     public event EventHandler? Activated;
     public event EventHandler? CloseRequested;
@@ -93,6 +96,7 @@ public partial class TerminalPane : UserControl, IDisposable
         Term.WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         Term.Win32InputMode = false;
         Term.LogConPTYOutput = false;
+        InstallInputFilter();
 
         _profile = profile;
         ApplyAppearance(settings.FontFamily, settings.FontSize);
@@ -132,6 +136,7 @@ public partial class TerminalPane : UserControl, IDisposable
         }
 
         _ = Term.RestartTerm(null!, true);
+        InstallInputFilter();
     }
 
     public void ApplyIdentity(string alias, ConnectionMode resolvedMode, ConnectionMode? modeOverride, bool demo)
@@ -396,6 +401,27 @@ public partial class TerminalPane : UserControl, IDisposable
     {
         try { return Term.Terminal.GetSelectedText() ?? string.Empty; }
         catch { return string.Empty; }
+    }
+
+    private void InstallInputFilter()
+    {
+        var term = Term.ConPTYTerm;
+        if (term != null)
+        {
+            term.InterceptInputToTermApp = FilterTerminalResponses;
+        }
+    }
+
+    private static void FilterTerminalResponses(ref Span<char> input)
+    {
+        if (input.Length < 4 || input.IndexOf('\x1b') < 0) return;
+
+        var text = input.ToString();
+        var cleaned = TerminalResponse.Replace(text, string.Empty);
+        if (cleaned.Length != text.Length)
+        {
+            input = cleaned.ToCharArray().AsSpan();
+        }
     }
 
     public bool SendText(string text)
