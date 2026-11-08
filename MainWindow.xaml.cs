@@ -111,7 +111,7 @@ public partial class MainWindow : Window
     private DateTime _hoverSuppressedUntil;
     private readonly DispatcherTimer _snapTimer = new() { Interval = TimeSpan.FromMilliseconds(180) };
 
-    private const double ScrollDurationMs = 240;
+    private const double ScrollDurationMs = 480;
 
     public MainWindow(AppSettings settings, StartupOptions startup)
     {
@@ -1605,7 +1605,7 @@ public partial class MainWindow : Window
         index = Math.Clamp(index, 0, maxStart);
 
         var left = _panes[index].TranslatePoint(new Point(0, 0), PaneHost).X - 3;
-        _hoverSuppressedUntil = DateTime.UtcNow.AddMilliseconds(380);
+        _hoverSuppressedUntil = DateTime.UtcNow.AddMilliseconds(ScrollDurationMs + 150);
         StartScroll(left);
     }
 
@@ -1622,7 +1622,7 @@ public partial class MainWindow : Window
 
         _scrollStartOffset = current;
         _scrollTarget = target;
-        _scrollStartTime = DateTime.UtcNow;
+        _scrollStartTime = default;
         _scrollAnimating = true;
         _scrollAnimTimer.Start();
     }
@@ -1630,6 +1630,10 @@ public partial class MainWindow : Window
     private void AnimateScroll()
     {
         if (!_scrollAnimating) return;
+
+        // O primeiro tick marca o início: se a UI estiver ocupada quando a
+        // rolagem é pedida, a animação ainda começa do zero em vez de pular.
+        if (_scrollStartTime == default) _scrollStartTime = DateTime.UtcNow;
 
         var elapsed = (DateTime.UtcNow - _scrollStartTime).TotalMilliseconds;
         var t = Math.Clamp(elapsed / ScrollDurationMs, 0, 1);
