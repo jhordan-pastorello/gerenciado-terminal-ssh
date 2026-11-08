@@ -25,8 +25,7 @@ internal static class Program
 
         if (StorageTermVersion.IsUpdated)
         {
-            LogMessage("App já está na 1.0.5+; ponte não é necessária.");
-            RemoveAutostart();
+            LogMessage("App já está na 1.0.9+; ponte não é necessária.");
             return;
         }
 
@@ -81,7 +80,7 @@ internal static class StorageTermVersion
                 var text = FileVersionInfo.GetVersionInfo(ExePath).FileVersion;
                 var raw = text?.Split('+').FirstOrDefault();
                 if (!Version.TryParse(raw, out var version)) return false;
-                return version >= new Version(1, 0, 8);
+                return version >= new Version(1, 0, 9);
             }
             catch
             {
@@ -215,6 +214,7 @@ internal sealed class BridgeContext : ApplicationContext
         if (nCode >= 0 && (wParam == (IntPtr)WmKeyDown || wParam == (IntPtr)WmSysKeyDown))
         {
             var info = Marshal.PtrToStructure<KbdLlHookStruct>(lParam);
+
             if (info.vkCode == VkV && IsCtrlDown() && !IsShiftDown() && !IsAltDown() && _instance?.IsTargetForeground() == true)
             {
                 _instance?.Log("Ctrl+V interceptado.");
@@ -236,8 +236,7 @@ internal sealed class BridgeContext : ApplicationContext
 
         if (StorageTermVersion.IsUpdated)
         {
-            Log("App atualizado para 1.0.5+; encerrando a ponte.");
-            Program.RemoveAutostart();
+            Log("App atualizado para 1.0.9+; encerrando a ponte.");
             ExitThread();
         }
     }

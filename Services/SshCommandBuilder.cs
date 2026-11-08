@@ -55,7 +55,7 @@ public static class SshCommandBuilder
 
         if (tmuxSession != null)
         {
-            command += $" \"tmux start-server \\; set -g default-terminal xterm-256color \\; set -as terminal-overrides *:smcup@:rmcup@ \\; set -s escape-time 500 \\; set -s extended-keys off \\; set -g focus-events off \\; set -g mouse on \\; set -g status off \\; set -g pane-border-style fg=#2A2A2A \\; set -g pane-active-border-style fg=#6E6E6E \\; new-session -A -s {tmuxSession} || exec bash -l\"";
+            command += $" \"tmux start-server \\; set -g default-terminal xterm-256color \\; set -as terminal-overrides '*:smcup@:rmcup@' \\; set -s escape-time 500 \\; set -s extended-keys off \\; set -g focus-events off \\; set -g mouse on \\; set -g status off \\; set -g pane-border-style fg=#2A2A2A \\; set -g pane-active-border-style fg=#6E6E6E \\; new-session -A -s {tmuxSession} || exec bash -l\"";
         }
 
         return command;

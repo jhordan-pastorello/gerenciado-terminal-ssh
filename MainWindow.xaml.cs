@@ -97,6 +97,7 @@ public partial class MainWindow : Window
     private IntPtr _keyboardHook;
     private bool _resumeInProgress;
     private TerminalPane? _active;
+    private TerminalPane? _hoverPane;
     private bool _shuttingDown;
     private bool _hotkeysRegistered;
     private bool _probeInFlight;
@@ -110,10 +111,6 @@ public partial class MainWindow : Window
     private double _carouselStep;
     private DateTime _hoverSuppressedUntil;
     private readonly DispatcherTimer _snapTimer = new() { Interval = TimeSpan.FromMilliseconds(180) };
-    private readonly DispatcherTimer _arrowTimer = new() { Interval = TimeSpan.FromMilliseconds(35) };
-    private TerminalPane? _arrowPane;
-    private string _arrowKey = string.Empty;
-    private int _arrowRepeat;
 
     private const double ScrollDurationMs = 480;
 
@@ -141,7 +138,6 @@ public partial class MainWindow : Window
             _snapTimer.Stop();
             SnapToNearestPage();
         };
-        _arrowTimer.Tick += (_, _) => FlushArrow();
         PaneScroller.ScrollChanged += PaneScroller_ScrollChanged;
         PaneScroller.SizeChanged += (_, _) => LayoutPanes();
         SizeChanged += (_, _) => LayoutPanes();
@@ -331,6 +327,12 @@ public partial class MainWindow : Window
         LayoutPanes();
         UpdateChrome();
 
+        if (!demo && _settings.PersistentSession)
+        {
+            var alias = pane.Alias;
+            _ = Task.Run(() => TmuxKeyService.WarmUp(alias));
+        }
+
         if (focus) SetActivePane(pane, focus: true);
 
         var label = demo ? "shell local" : target.Alias;
@@ -514,18 +516,24 @@ public partial class MainWindow : Window
         if (_scrollAnimating || DateTime.UtcNow < _hoverSuppressedUntil) return;
 
         var hovered = FindPaneAtCursor();
-        if (hovered != null)
+        if (hovered == null) return;
+
+        if (_hoverPane != hovered)
         {
-            if (_active != hovered)
-            {
-                SetActivePane(hovered, focus: true);
-            }
-            else if (!hovered.HasNativeFocus)
-            {
-                // Se o foco ficou na barra/ScrollViewer, devolve as setas ao
-                // terminal nativo da sessão.
-                hovered.FocusTerminal();
-            }
+            _hoverPane?.SetHovered(false);
+            _hoverPane = hovered;
+            _hoverPane.SetHovered(true);
+        }
+
+        if (_active != hovered)
+        {
+            SetActivePane(hovered, focus: true);
+        }
+        else if (!hovered.HasNativeFocus)
+        {
+            // Se o foco ficou na barra/ScrollViewer, devolve as setas ao
+            // terminal nativo da sessão.
+            hovered.FocusTerminal();
         }
     }
 
@@ -738,6 +746,7 @@ public partial class MainWindow : Window
         pane.Dispose();
 
         if (_active == pane) _active = null;
+        if (_hoverPane == pane) _hoverPane = null;
 
         LayoutPanes();
         SetActivePane(_active ?? _panes.LastOrDefault(), focus: true);
@@ -1467,8 +1476,8 @@ public partial class MainWindow : Window
         _hoverTimer.Stop();
         _scrollAnimTimer.Stop();
         _snapTimer.Stop();
-        _arrowTimer.Stop();
 
+        TmuxKeyService.Shutdown();
         UnregisterHotkeys();
 
         try { _tray?.Dispose(); } catch { }
@@ -1588,21 +1597,6 @@ public partial class MainWindow : Window
         var current = _active == null ? -1 : _panes.IndexOf(_active);
         var next = (current + delta + _panes.Count) % _panes.Count;
         SetActivePane(_panes[next], focus: true);
-    }
-
-    private void FlushArrow()
-    {
-        _arrowTimer.Stop();
-
-        var pane = _arrowPane;
-        var key = _arrowKey;
-        var repeat = _arrowRepeat;
-        _arrowPane = null;
-        _arrowKey = string.Empty;
-        _arrowRepeat = 0;
-
-        if (pane == null || key.Length == 0) return;
-        _ = TmuxKeyService.SendAsync(pane.Alias, pane.SessionSlot, key, repeat);
     }
 
     private void ScrollCarousel(int direction)
@@ -1855,20 +1849,15 @@ public partial class MainWindow : Window
             var shift = (GetAsyncKeyState(VkShift) & 0x8000) != 0;
 
             // Setas em sessão tmux: o ConPTY/TUI às vezes não recebe o keydown.
-            // Envia pelo próprio tmux, que entrega ao agente/menu. O alvo é o
-            // painel sob o mouse; se o mouse não estiver em um painel, usa o ativo.
+            // Envia pelo próprio tmux, pelo canal SSH persistente, para o
+            // painel que está com o foco do teclado (onde o usuário digita).
             if (!ctrl && !alt && !shift &&
                 info.vkCode is >= 0x25 and <= 0x28 &&
                 _settings.PersistentSession)
             {
-                var arrowPane = FindPaneAtCursor() ?? _active;
+                var arrowPane = _active;
                 if (arrowPane is { IsDemo: false, SessionSlot: > 0 })
                 {
-                    if (arrowPane != _active)
-                    {
-                        SetActivePane(arrowPane, focus: true);
-                    }
-
                     var key = info.vkCode switch
                     {
                         0x25 => "Left",
@@ -1880,20 +1869,7 @@ public partial class MainWindow : Window
 
                     if (key.Length > 0)
                     {
-                        if (_arrowPane == arrowPane && _arrowKey == key)
-                        {
-                            _arrowRepeat++;
-                        }
-                        else
-                        {
-                            FlushArrow();
-                            _arrowPane = arrowPane;
-                            _arrowKey = key;
-                            _arrowRepeat = 1;
-                        }
-
-                        _arrowTimer.Stop();
-                        _arrowTimer.Start();
+                        TmuxKeyService.Send(arrowPane.Alias, arrowPane.SessionSlot, key);
                         return (IntPtr)1;
                     }
                 }

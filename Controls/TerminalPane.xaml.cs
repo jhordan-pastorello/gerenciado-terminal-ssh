@@ -28,7 +28,9 @@ public partial class TerminalPane : UserControl, IDisposable
 
     private Brush _accentBrush = Frozen("#9A9A9A");
     private Brush _idleBorderBrush = Frozen("#242424");
+    private Brush _hoverBorderBrush = Frozen("#4A4A4A");
     private bool _isActive;
+    private bool _isHovered;
 
     private MenuItem? _menuAuto;
     private MenuItem? _menuLan;
@@ -187,17 +189,32 @@ public partial class TerminalPane : UserControl, IDisposable
     public void SetActive(bool active)
     {
         _isActive = active;
-        PaneBorder.BorderBrush = active ? _accentBrush : _idleBorderBrush;
+        PaneBorder.BorderBrush = active
+            ? _accentBrush
+            : _isHovered ? _hoverBorderBrush : _idleBorderBrush;
         Header.Background = active ? HeaderActive : HeaderIdle;
         ActiveBar.Background = active ? _accentBrush : Brushes.Transparent;
         HostText.Foreground = active ? TextPrimary : HostInactive;
         IndexText.Foreground = active ? _accentBrush : TextMuted;
     }
 
+    /// <summary>
+    /// Destaque visual do mouse. O timer de hover também move o foco do
+    /// teclado para este painel.
+    /// </summary>
+    public void SetHovered(bool hovered)
+    {
+        if (_isHovered == hovered) return;
+        _isHovered = hovered;
+        if (_isActive) return;
+        PaneBorder.BorderBrush = hovered ? _hoverBorderBrush : _idleBorderBrush;
+    }
+
     public void SetAccentColor(Color color)
     {
         _accentBrush = Frozen(color);
         _idleBorderBrush = Frozen(Color.FromArgb(70, color.R, color.G, color.B));
+        _hoverBorderBrush = Frozen(Color.FromArgb(150, color.R, color.G, color.B));
         ColorBar.Background = _accentBrush;
         SetActive(_isActive);
     }
