@@ -472,6 +472,23 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
+    private TerminalPane? FindPaneAtCursor()
+    {
+        if (_panes.Count == 0 || !GetCursorPos(out var cursor)) return null;
+
+        var local = PaneHost.PointFromScreen(new Point(cursor.X, cursor.Y));
+        foreach (var pane in _panes)
+        {
+            if (pane.ActualWidth <= 0 || pane.ActualHeight <= 0) continue;
+
+            var topLeft = pane.TranslatePoint(new Point(0, 0), PaneHost);
+            var bounds = new Rect(topLeft, new Size(pane.ActualWidth, pane.ActualHeight));
+            if (bounds.Contains(local)) return pane;
+        }
+
+        return null;
+    }
+
     private void UpdateHoverFocus()
     {
         if (!IsActive || _shuttingDown || _panes.Count == 0 || WindowState == WindowState.Minimized)
@@ -479,23 +496,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (!GetCursorPos(out var cursor)) return;
-
-        var local = PaneHost.PointFromScreen(new Point(cursor.X, cursor.Y));
-        TerminalPane? hovered = null;
-
-        foreach (var pane in _panes)
-        {
-            if (pane.ActualWidth <= 0 || pane.ActualHeight <= 0) continue;
-
-            var topLeft = pane.TranslatePoint(new Point(0, 0), PaneHost);
-            var bounds = new Rect(topLeft, new Size(pane.ActualWidth, pane.ActualHeight));
-            if (!bounds.Contains(local)) continue;
-
-            hovered = pane;
-            break;
-        }
-
+        var hovered = FindPaneAtCursor();
         if (hovered != null)
         {
             if (_active != hovered)
@@ -1575,7 +1576,7 @@ public partial class MainWindow : Window
         if (_panes.Count <= 2) return;
 
         var baseOffset = _scrollAnimating ? _scrollTarget : PaneScroller.HorizontalOffset;
-        var step = Math.Max(160, PaneScroller.ViewportWidth * 0.18);
+        var step = Math.Max(120, PaneScroller.ViewportWidth * 0.10);
         SmoothScrollTo(baseOffset + direction * step);
     }
 
@@ -1603,7 +1604,15 @@ public partial class MainWindow : Window
             return;
         }
 
-        PaneScroller.ScrollToHorizontalOffset(current + difference * 0.18);
+        // Velocidade limitada: evita o "salto" quando o alvo está longe.
+        var movement = difference * 0.12;
+        const double maxStep = 12;
+        if (Math.Abs(movement) > maxStep)
+        {
+            movement = Math.Sign(movement) * maxStep;
+        }
+
+        PaneScroller.ScrollToHorizontalOffset(current + movement);
     }
 
     private void FocusPane(int index)
