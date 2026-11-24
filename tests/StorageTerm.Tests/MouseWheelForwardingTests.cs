@@ -35,11 +35,19 @@ public class MouseWheelForwardingTests
     [InlineData(800, 600)]
     [InlineData(-1920, 300)]
     [InlineData(100, -50)]
-    public void BuildMouseWheelParams_PacksSignedScreenCoordinates(int x, int y)
+    public void BuildMouseWheelParams_PacksSignedCoordinates(int x, int y)
     {
         var (_, lParam) = TerminalPane.BuildMouseWheelParams(120, 0, x, y);
 
         Assert.Equal(x, LowWord(lParam));
         Assert.Equal(y, HighWord(lParam));
+    }
+
+    [Fact]
+    public void BuildMouseWheelParams_TruncatesDeltaToSignedShort()
+    {
+        var (wParam, _) = TerminalPane.BuildMouseWheelParams(0x10000 - 120, 0, 0, 0);
+
+        Assert.Equal(-120, HighWord(wParam));
     }
 }

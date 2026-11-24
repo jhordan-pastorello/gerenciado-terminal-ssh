@@ -497,10 +497,14 @@ public partial class MainWindow : Window
         // carrossel continua em Shift+wheel, touchpad horizontal (WM_MOUSEHWHEEL),
         // Alt+PageUp/PageDown e na barra.
         var pane = FindPaneAtCursor();
-        if (pane == null) return;
+        if (pane == null)
+        {
+            e.Handled = true;
+            return;
+        }
 
-        e.Handled = true;
-        pane.ForwardMouseWheel(e);
+        // Só consome se o terminal tratou a roda; senão o WPF ainda pode rolar o PTY.
+        if (pane.ForwardMouseWheel(e)) e.Handled = true;
     }
 
     private TerminalPane? FindPaneAtCursor()

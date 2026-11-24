@@ -335,22 +335,37 @@ public partial class TerminalPane : UserControl, IDisposable
     {
         if (_disposed || _forwardingWheel) return false;
 
+        // Ordem: HWND por reflection -> HWND por hit-test -> SendMessage com
+        // coordenadas de cliente -> evento WPF (TryRaiseMouseWheel).
         var native = GetNativeTerminalHandle();
         if (native == IntPtr.Zero)
         {
             native = FindNativeTerminal();
-            if (!IsTerminalWindow(native)) return false;
+            if (!IsTerminalWindow(native)) native = IntPtr.Zero;
         }
 
+        if (native != IntPtr.Zero && SendWheelToNative(native, e)) return true;
+
+        return TryRaiseMouseWheel(e);
+    }
+
+    private bool SendWheelToNative(IntPtr native, MouseWheelEventArgs e)
+    {
         if (!GetCursorPos(out var cursor)) return false;
 
-        var (wParam, lParam) = BuildMouseWheelParams(e.Delta, GetWheelKeyState(e), cursor.X, cursor.Y);
+        // O HwndTerminal interpreta o lParam em coordenadas do próprio HWND.
+        var client = cursor;
+        if (!ScreenToClient(native, ref client)) return false;
+
+        var (wParam, lParam) = BuildMouseWheelParams(e.Delta, GetWheelKeyState(e), client.X, client.Y);
 
         // Se o HWND nativo devolver a mensagem ao pai (DefWindowProc), o WPF
         // dispararia a roda de novo; a flag evita reentrada.
         _forwardingWheel = true;
         try
         {
+            // WM_MOUSEWHEEL retorna 0 quando processada, então o retorno não
+            // distingue "sem efeito"; só exceção/falha antes do envio cai no fallback.
             SendMessage(native, WmMouseWheel, wParam, lParam);
             return true;
         }
@@ -365,10 +380,53 @@ public partial class TerminalPane : UserControl, IDisposable
         }
     }
 
-    public static (IntPtr WParam, IntPtr LParam) BuildMouseWheelParams(int delta, int keyState, int screenX, int screenY)
+    /// <summary>
+    /// Fallback WPF: re-dispara MouseWheel no controle do terminal e informa
+    /// se algum handler o tratou. O evento não borbulha além do terminal.
+    /// </summary>
+    public bool TryRaiseMouseWheel(MouseWheelEventArgs e)
     {
-        var wParam = (IntPtr)(((delta & 0xFFFF) << 16) | (keyState & 0xFFFF));
-        var lParam = (IntPtr)((screenX & 0xFFFF) | ((screenY & 0xFFFF) << 16));
+        if (_disposed || _forwardingWheel) return false;
+
+        var terminal = Term.Terminal;
+        var handledAtTerminal = false;
+        MouseWheelEventHandler probe = (_, args) =>
+        {
+            handledAtTerminal = args.Handled;
+            // Impede que o ScrollViewer do carrossel receba o evento reenviado.
+            args.Handled = true;
+        };
+
+        _forwardingWheel = true;
+        terminal.AddHandler(UIElement.MouseWheelEvent, probe, handledEventsToo: true);
+        try
+        {
+            var args = new MouseWheelEventArgs(e.MouseDevice, e.Timestamp, e.Delta)
+            {
+                RoutedEvent = UIElement.MouseWheelEvent,
+                Source = terminal
+            };
+            terminal.RaiseEvent(args);
+            return handledAtTerminal;
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Falha ao reenviar a roda do mouse via WPF: {ex.Message}");
+            return false;
+        }
+        finally
+        {
+            terminal.RemoveHandler(UIElement.MouseWheelEvent, probe);
+            _forwardingWheel = false;
+        }
+    }
+
+    public static (IntPtr WParam, IntPtr LParam) BuildMouseWheelParams(int delta, int keyState, int x, int y)
+    {
+        // Palavras altas/baixas com sinal: delta e coordenadas podem ser negativos.
+        var wheel = (int)(short)delta;
+        var wParam = (IntPtr)((wheel << 16) | (keyState & 0xFFFF));
+        var lParam = (IntPtr)((x & 0xFFFF) | ((y & 0xFFFF) << 16));
         return (wParam, lParam);
     }
 
@@ -833,6 +891,9 @@ public partial class TerminalPane : UserControl, IDisposable
 
     [DllImport("user32.dll")]
     private static extern bool GetCursorPos(out NativePoint point);
+
+    [DllImport("user32.dll")]
+    private static extern bool ScreenToClient(IntPtr hWnd, ref NativePoint point);
 
     [DllImport("user32.dll")]
     private static extern bool EnumChildWindows(IntPtr parent, EnumWindowsProc callback, IntPtr lParam);
