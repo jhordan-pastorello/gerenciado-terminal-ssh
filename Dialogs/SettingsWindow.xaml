@@ -128,6 +128,18 @@
                                    FontSize="10.5" Foreground="{StaticResource TextMutedBrush}"
                                    TextWrapping="Wrap" Margin="25,4,0,14" />
 
+                        <CheckBox x:Name="TmuxArrowBridgeCheck" Style="{StaticResource DarkCheckBox}"
+                                  Content="Enviar setas via tmux (legado Cursor/Kiro)" />
+                        <TextBlock Text="Só com sessão persistente. Desligado por padrão: as setas vão direto ao terminal, necessário para TUIs como o OpenCode. Só ligue se as setas falharem em sessões tmux."
+                                   FontSize="10.5" Foreground="{StaticResource TextMutedBrush}"
+                                   TextWrapping="Wrap" Margin="25,4,0,14" />
+
+                        <CheckBox x:Name="Win32InputModeCheck" Style="{StaticResource DarkCheckBox}"
+                                  Content="Entrada estendida do terminal (TUIs / mouse OpenCode)" />
+                        <TextBlock Text="Ligado por padrão: necessário para TUIs como o OpenCode. Se AltGr/ABNT2 digitar errado, desligue (pode limitar alguns TUIs). Vale para novos terminais."
+                                   FontSize="10.5" Foreground="{StaticResource TextMutedBrush}"
+                                   TextWrapping="Wrap" Margin="25,4,0,14" />
+
                         <CheckBox x:Name="ConfirmCloseCheck" Style="{StaticResource DarkCheckBox}"
                                   Content="Pedir confirmação ao fechar um terminal conectado" />
                         <TextBlock Text="Ctrl+Q ou Ctrl+Shift+W abrem a confirmação; o ✕ do painel segue a mesma regra."

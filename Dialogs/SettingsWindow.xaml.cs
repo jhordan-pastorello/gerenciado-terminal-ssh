@@ -27,7 +27,15 @@ public partial class SettingsWindow : Window
         Height = Math.Min(Height, Math.Max(MinHeight, workArea.Height - 40));
 
         LoadValues();
+        PersistentSessionCheck.Checked += (_, _) => UpdateTmuxBridgeEnabled();
+        PersistentSessionCheck.Unchecked += (_, _) => UpdateTmuxBridgeEnabled();
+        UpdateTmuxBridgeEnabled();
         Loaded += (_, _) => LanAliasBox.Focus();
+    }
+
+    private void UpdateTmuxBridgeEnabled()
+    {
+        TmuxArrowBridgeCheck.IsEnabled = PersistentSessionCheck.IsChecked == true;
     }
 
     private void LoadValues()
@@ -43,6 +51,8 @@ public partial class SettingsWindow : Window
 
         AutoReconnectCheck.IsChecked = _source.AutoReconnect;
         PersistentSessionCheck.IsChecked = _source.PersistentSession;
+        TmuxArrowBridgeCheck.IsChecked = _source.TmuxArrowBridge;
+        Win32InputModeCheck.IsChecked = _source.Win32InputMode;
         ConfirmCloseCheck.IsChecked = _source.ConfirmClose;
         KeepAwakeCheck.IsChecked = _source.KeepAwake;
         StartWithWindowsCheck.IsChecked = _source.StartWithWindows;
@@ -104,6 +114,8 @@ public partial class SettingsWindow : Window
 
         settings.AutoReconnect = AutoReconnectCheck.IsChecked == true;
         settings.PersistentSession = PersistentSessionCheck.IsChecked == true;
+        settings.TmuxArrowBridge = TmuxArrowBridgeCheck.IsChecked == true;
+        settings.Win32InputMode = Win32InputModeCheck.IsChecked == true;
         settings.ConfirmClose = ConfirmCloseCheck.IsChecked == true;
         settings.KeepAwake = KeepAwakeCheck.IsChecked == true;
         settings.StartWithWindows = StartWithWindowsCheck.IsChecked == true;

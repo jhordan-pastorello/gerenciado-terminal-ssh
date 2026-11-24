@@ -76,6 +76,7 @@ Para apagar também configurações e logs: `.\uninstall.ps1 -RemoveData`.
 ## Solução de problemas
 
 - **`Could not load file or assembly ...` após uma atualização** (ex.: ao criar o ícone da bandeja): a pasta de instalação ficou com arquivos misturados. Reinstale com `install.ps1` ou baixe o zip da última release e extraia por cima de uma pasta limpa. O log da última atualização fica em `%LocalAppData%\StorageTerm\updater-last.log`.
+- **OpenCode sem rolagem/abas**: em Configurações, ligue **Entrada estendida do terminal** (`Win32InputMode`) e desligue **Enviar setas via tmux** (`TmuxArrowBridge`).
 
 ## Atualizações automáticas
 
@@ -213,6 +214,8 @@ Abra pelo botão **⋯** no canto superior direito → **Configurações** (ou p
 - **Host/porta de teste da LAN**: padrão `192.168.1.30:22`.
 - **Reconectar automaticamente** quando a conexão cair.
 - **Sessão persistente no servidor (tmux)** — mantém o trabalho através de suspensão/quedas.
+- **Enviar setas via tmux (legado)** (`TmuxArrowBridge`) — só com sessão persistente; desligado por padrão. Ligue apenas se as setas falharem em sessões tmux; atrapalha TUIs como o OpenCode.
+- **Entrada estendida do terminal** (`Win32InputMode`) — ligada por padrão; envia teclas estendidas ao ConPTY, necessário para vários TUIs. Se AltGr/ABNT2 digitar errado, desligue (vale para novos terminais).
 - **Pedir confirmação** ao fechar um terminal conectado.
 - **Manter o PC acordado** enquanto houver sessões.
 - **Iniciar com o Windows** (Run do usuário) e **iniciar minimizado**.

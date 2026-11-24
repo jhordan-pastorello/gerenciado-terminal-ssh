@@ -1907,6 +1907,13 @@ public partial class MainWindow : Window
         return IntPtr.Zero;
     }
 
+    /// <summary>Setas puras (sem modificadores) com a ponte tmux e a sessão persistente ligadas.</summary>
+    internal static bool ShouldBridgeArrowKeys(
+        uint vkCode, bool ctrl, bool alt, bool shift, bool tmuxArrowBridge, bool persistentSession) =>
+        !ctrl && !alt && !shift &&
+        vkCode is >= 0x25 and <= 0x28 &&
+        tmuxArrowBridge && persistentSession;
+
     private IntPtr KeyboardHookProc(int nCode, IntPtr wParam, IntPtr lParam)
     {
         if (nCode >= 0 &&
@@ -1924,9 +1931,8 @@ public partial class MainWindow : Window
             // Setas em sessão tmux: o ConPTY/TUI às vezes não recebe o keydown.
             // Envia pelo próprio tmux, pelo canal SSH persistente, para o
             // painel que está com o foco do teclado (onde o usuário digita).
-            if (!ctrl && !alt && !shift &&
-                info.vkCode is >= 0x25 and <= 0x28 &&
-                _settings.PersistentSession)
+            if (ShouldBridgeArrowKeys(info.vkCode, ctrl, alt, shift,
+                    _settings.TmuxArrowBridge, _settings.PersistentSession))
             {
                 var arrowPane = _active;
                 if (arrowPane is { IsDemo: false, SessionSlot: > 0 })

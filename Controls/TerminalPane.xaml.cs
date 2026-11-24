@@ -105,7 +105,9 @@ public partial class TerminalPane : UserControl, IDisposable
     {
         Term.StartupCommandLine = command;
         Term.WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        Term.Win32InputMode = false;
+        // Só teclado/ConPTY: envia teclas estendidas (Win32 input mode). Necessário para vários
+        // TUIs; se AltGr/ABNT2 falhar, desligar em Configurações.
+        Term.Win32InputMode = settings.Win32InputMode;
         Term.LogConPTYOutput = false;
         InstallInputFilter();
 
@@ -335,8 +337,10 @@ public partial class TerminalPane : UserControl, IDisposable
     {
         if (_disposed || _forwardingWheel) return false;
 
-        // Ordem: HWND por reflection -> HWND por hit-test -> SendMessage com
-        // coordenadas de cliente -> evento WPF (TryRaiseMouseWheel).
+        // Ordem: WM_MOUSEWHEEL no HWND nativo (HWND por reflection/hit-test,
+        // coordenadas de cliente). É o terminal nativo que decide entre
+        // scrollback e mouse tracking de TUIs. Fallback: evento WPF, que só
+        // aciona a scrollbar do TerminalControl e não envia VT mouse ao TUI.
         var native = GetNativeTerminalHandle();
         if (native == IntPtr.Zero)
         {
@@ -381,8 +385,10 @@ public partial class TerminalPane : UserControl, IDisposable
     }
 
     /// <summary>
-    /// Fallback WPF: re-dispara MouseWheel no controle do terminal e informa
-    /// se algum handler o tratou. O evento não borbulha além do terminal.
+    /// Fallback WPF (usado se o envio nativo falhar): re-dispara MouseWheel no
+    /// controle do terminal e informa se algum handler o tratou. Isso apenas
+    /// move a scrollbar; não envia mouse tracking VT ao TUI. O evento não
+    /// borbulha além do terminal.
     /// </summary>
     public bool TryRaiseMouseWheel(MouseWheelEventArgs e)
     {

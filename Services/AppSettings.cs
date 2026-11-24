@@ -41,6 +41,13 @@ public sealed class AppSettings
     public bool AutoReconnect { get; set; } = true;
     public bool KeepAwake { get; set; } = true;
     public bool PersistentSession { get; set; } = true;
+    /// <summary>Legado: envia setas via tmux send-keys em vez do PTY.</summary>
+    public bool TmuxArrowBridge { get; set; }
+    /// <summary>
+    /// Modo Win32 input do ConPTY: envia teclas estendidas ao terminal. Necessário para vários
+    /// TUIs. Se AltGr/ABNT2 falhar, desligue em Configurações.
+    /// </summary>
+    public bool Win32InputMode { get; set; } = true;
     public bool StartWithWindows { get; set; }
     public bool StartMinimized { get; set; } = true;
     public bool ConfirmClose { get; set; } = true;
@@ -81,15 +88,22 @@ public sealed class AppSettings
             }
 
             var json = File.ReadAllText(AppPaths.SettingsFile);
-            var settings = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions) ?? new AppSettings();
-            settings.Normalize();
-            return settings;
+            return FromJson(json);
         }
         catch (Exception ex)
         {
             Log.Error("Falha ao carregar configurações; usando padrões.", ex);
             return new AppSettings();
         }
+    }
+
+    public string ToJson() => JsonSerializer.Serialize(this, JsonOptions);
+
+    public static AppSettings FromJson(string json)
+    {
+        var settings = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions) ?? new AppSettings();
+        settings.Normalize();
+        return settings;
     }
 
     public AppSettings Clone() => (AppSettings)MemberwiseClone();
@@ -114,7 +128,7 @@ public sealed class AppSettings
             Normalize();
             var dir = AppPaths.DataDirectory;
             var temp = Path.Combine(dir, "settings.tmp");
-            File.WriteAllText(temp, JsonSerializer.Serialize(this, JsonOptions));
+            File.WriteAllText(temp, ToJson());
             File.Move(temp, AppPaths.SettingsFile, overwrite: true);
         }
         catch (Exception ex)
