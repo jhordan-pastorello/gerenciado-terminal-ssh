@@ -189,6 +189,7 @@ public partial class MainWindow : Window
             _ = InitialUpdateCheckAsync();
             _startupComplete = true;
             UpdateChrome();
+            RestorePendingUpdate();
 
             if (_startup.StartInTray && _settings.StartMinimized)
             {
@@ -1223,6 +1224,11 @@ public partial class MainWindow : Window
             }
 
             ShowToast($"Nova versão v{info.Version} encontrada — baixando…");
+            if (!manual)
+            {
+                _tray?.ShowBalloon($"Nova versão v{info.Version} encontrada. Baixando…");
+            }
+
             var zip = await _updateService.DownloadAsync(info);
             if (zip == null)
             {
@@ -1230,11 +1236,8 @@ public partial class MainWindow : Window
                 return;
             }
 
-            _pendingUpdate = info;
-            _pendingUpdateZip = zip;
-            MoreButton.Foreground = (Brush)FindResource("AccentBrush");
-            MoreButton.ToolTip = $"Mais ações · atualização v{info.Version} pronta";
-            ShowToast($"Atualização v{info.Version} pronta — ⋯ → Atualizar agora ou ao sair.");
+            SetPendingUpdate(info, zip);
+            NotifyUpdateReady(info);
             Log.Info($"Updater: atualização {info.Tag} pronta para aplicar.");
         }
         catch (Exception ex)
@@ -1245,6 +1248,35 @@ public partial class MainWindow : Window
         finally
         {
             _updateCheckInFlight = false;
+        }
+    }
+
+    private void SetPendingUpdate(UpdateInfo info, string zipPath)
+    {
+        _pendingUpdate = info;
+        _pendingUpdateZip = zipPath;
+        MoreButton.Foreground = (Brush)FindResource("AccentBrush");
+        MoreButton.ToolTip = $"Mais ações · atualização v{info.Version} pronta";
+        _tray?.UpdateUpdateMenu(info.Version, UpdateService.IsInstalledBuild);
+    }
+
+    private void NotifyUpdateReady(UpdateInfo info)
+    {
+        ShowToast($"Atualização v{info.Version} pronta — ⋯ → Atualizar agora ou ao sair.");
+        _tray?.ShowBalloon(
+            $"Atualização v{info.Version} pronta. Use o menu ⋯ ou o ícone da bandeja → Atualizar.",
+            System.Windows.Forms.ToolTipIcon.Warning,
+            8000);
+    }
+
+    private void RestorePendingUpdate()
+    {
+        if (!UpdateService.IsInstalledBuild) return;
+
+        if (_updateService.TryLoadPendingDownload() is { } pending)
+        {
+            SetPendingUpdate(pending.Info, pending.ZipPath);
+            NotifyUpdateReady(pending.Info);
         }
     }
 
@@ -1405,7 +1437,10 @@ public partial class MainWindow : Window
                     _settings.Save();
                     UpdateChrome();
                     ShowToast(enabled ? "StorageTerm iniciará com o Windows." : "Inicialização com o Windows desativada.");
-                });
+                },
+                checkUpdates: () => Dispatcher.BeginInvoke(() => _ = CheckForUpdatesAsync(manual: true)),
+                applyUpdate: () => Dispatcher.BeginInvoke(ApplyUpdateNow));
+            _tray.UpdateUpdateMenu(_pendingUpdate?.Version, UpdateService.IsInstalledBuild);
         }
         catch (Exception ex)
         {

@@ -37,7 +37,14 @@ public sealed class UpdateService
     public static bool IsInstalledBuild =>
         File.Exists(Path.Combine(AppContext.BaseDirectory, "install.json"));
 
-    public string UpdatesDirectory => Path.Combine(AppPaths.DataDirectory, "updates");
+    private readonly string? _updatesDirectoryOverride;
+
+    public UpdateService(string? updatesDirectory = null)
+    {
+        _updatesDirectoryOverride = updatesDirectory;
+    }
+
+    public string UpdatesDirectory => _updatesDirectoryOverride ?? Path.Combine(AppPaths.DataDirectory, "updates");
 
     public static string VersionLabel => CurrentVersion.ToString(3);
 
@@ -105,6 +112,49 @@ public sealed class UpdateService
 
         Log.Info($"Updater: nova versão {tag} disponível (atual {VersionLabel}).");
         return new UpdateInfo(version, tag, zipUrl, checksumUrl, releaseUrl);
+    }
+
+    /// <summary>
+    /// Procura um zip já baixado e verificado (o arquivo só recebe o nome final após o SHA-256 conferir)
+    /// em <see cref="UpdatesDirectory"/>. Retorna o mais novo cuja versão supera a atual.
+    /// </summary>
+    public (UpdateInfo Info, string ZipPath)? TryLoadPendingDownload()
+    {
+        try
+        {
+            var root = UpdatesDirectory;
+            if (!Directory.Exists(root)) return null;
+
+            (UpdateInfo Info, string ZipPath)? best = null;
+
+            foreach (var directory in Directory.EnumerateDirectories(root))
+            {
+                var tag = Path.GetFileName(directory);
+                if (!SafeTag.IsMatch(tag) || !IsNewer(tag, CurrentVersion)) continue;
+                if (!Version.TryParse(tag.TrimStart('v', 'V'), out var version)) continue;
+
+                var zipPath = Path.Combine(directory, AssetName);
+                if (!File.Exists(zipPath)) continue;
+
+                if (best is { } current && Normalize(current.Info.Version) >= Normalize(version)) continue;
+
+                var info = new UpdateInfo(version, tag, string.Empty, string.Empty,
+                    $"{RepositoryUrl}/releases/tag/{tag}");
+                best = (info, zipPath);
+            }
+
+            if (best is { } found)
+            {
+                Log.Info($"Updater: download pendente {found.Info.Tag} encontrado em disco.");
+            }
+
+            return best;
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Updater: falha ao procurar download pendente: {ex.Message}");
+            return null;
+        }
     }
 
     public async Task<string?> DownloadAsync(UpdateInfo info, CancellationToken cancellationToken = default)

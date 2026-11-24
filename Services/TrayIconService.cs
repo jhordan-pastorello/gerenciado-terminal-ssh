@@ -15,6 +15,9 @@ public sealed class TrayIconService : IDisposable
     private readonly WinForms.ToolStripMenuItem _keepAwakeItem;
     private readonly WinForms.ToolStripMenuItem _startWithWindowsItem;
     private readonly WinForms.ToolStripMenuItem _openItem;
+    private readonly WinForms.ToolStripMenuItem _applyUpdateItem;
+    private readonly WinForms.ToolStripMenuItem _checkUpdatesItem;
+    private readonly WinForms.ToolStripSeparator _updateSeparator;
 
     public TrayIconService(
         Action showWindow,
@@ -23,7 +26,9 @@ public sealed class TrayIconService : IDisposable
         Action openSettings,
         Action exit,
         Action<bool> setKeepAwake,
-        Action<bool> setStartWithWindows)
+        Action<bool> setStartWithWindows,
+        Action checkUpdates,
+        Action applyUpdate)
     {
         _iconStream = System.Windows.Application.GetResourceStream(
             new Uri("pack://application:,,,/Assets/StorageTerm.ico"))?.Stream
@@ -65,6 +70,18 @@ public sealed class TrayIconService : IDisposable
             setStartWithWindows(next);
         };
 
+        _applyUpdateItem = new WinForms.ToolStripMenuItem("Atualizar")
+        {
+            Visible = false,
+            Font = new Font("Segoe UI", 9f, FontStyle.Bold)
+        };
+        _applyUpdateItem.Click += (_, _) => applyUpdate();
+
+        _checkUpdatesItem = new WinForms.ToolStripMenuItem("Verificar atualizações") { Visible = false };
+        _checkUpdatesItem.Click += (_, _) => checkUpdates();
+
+        _updateSeparator = new WinForms.ToolStripSeparator { Visible = false };
+
         var settings = new WinForms.ToolStripMenuItem("Configurações…");
         settings.Click += (_, _) => openSettings();
 
@@ -92,6 +109,9 @@ public sealed class TrayIconService : IDisposable
         menu.Items.Add(_startWithWindowsItem);
         menu.Items.Add(new WinForms.ToolStripSeparator());
         menu.Items.Add(settings);
+        menu.Items.Add(_updateSeparator);
+        menu.Items.Add(_applyUpdateItem);
+        menu.Items.Add(_checkUpdatesItem);
         menu.Items.Add(new WinForms.ToolStripSeparator());
         menu.Items.Add(exitItem);
 
@@ -117,12 +137,32 @@ public sealed class TrayIconService : IDisposable
         _notifyIcon.BalloonTipClicked += (_, _) => showWindow();
     }
 
-    public void ShowBalloon(string text)
+    /// <summary>Mostra/oculta os itens "Atualizar para vX" e "Verificar atualizações".</summary>
+    public void UpdateUpdateMenu(Version? pendingVersion, bool canCheck)
+    {
+        try
+        {
+            _applyUpdateItem.Visible = pendingVersion is not null;
+            if (pendingVersion is not null)
+            {
+                _applyUpdateItem.Text = $"Atualizar para v{pendingVersion.ToString(3)}";
+            }
+
+            _checkUpdatesItem.Visible = canCheck;
+            _updateSeparator.Visible = canCheck || pendingVersion is not null;
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    public void ShowBalloon(string text, WinForms.ToolTipIcon icon = WinForms.ToolTipIcon.Info, int timeoutMs = 3500)
     {
         try
         {
             _notifyIcon.Visible = true;
-            _notifyIcon.ShowBalloonTip(3500, "StorageTerm", text, WinForms.ToolTipIcon.Info);
+            _notifyIcon.ShowBalloonTip(timeoutMs, "StorageTerm", text, icon);
         }
         catch
         {

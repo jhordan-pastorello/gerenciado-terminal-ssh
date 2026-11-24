@@ -85,6 +85,8 @@ A versão **instalada** (a que tem o marcador `install.json`, criado pelo `insta
    - **ao sair** (silenciosamente — na próxima abertura já é a versão nova);
    - ou em **⋯ → Atualizar para vX.Y.Z** (confirma, encerra as sessões e reinicia o app).
 
+Quando a atualização termina de baixar, o app avisa na **bandeja do Windows** (balloon) e no toast da janela. Se o app foi fechado antes de aplicar, o zip já baixado em `%LOCALAPPDATA%\StorageTerm\updates\vX.Y.Z\` é restaurado na próxima abertura e a notificação aparece de novo. Para aplicar, use **⋯ → Atualizar para vX.Y.Z** ou o menu do ícone da bandeja → **Atualizar para vX.Y.Z**; o menu da bandeja também tem **Verificar atualizações**.
+
 O menu **⋯** mostra a versão atual e tem **Verificar atualizações**. A versão em `dist` e builds de desenvolvimento **não** se auto-atualizam (falta o `install.json`).
 
 ### Publicar uma nova versão
