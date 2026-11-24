@@ -302,12 +302,48 @@ public sealed class UpdateService
         Start-Sleep -Milliseconds 900
 
         $applied = $false
+        $staging = Join-Path $env:TEMP ("StorageTerm-update-" + [guid]::NewGuid().ToString("N"))
+        $logDir = Join-Path $env:LOCALAPPDATA "StorageTerm"
+        $log = Join-Path $logDir "updater-last.log"
+        New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+        function Write-Log([string]$m) { "$(Get-Date -Format s) $m" | Add-Content -LiteralPath $log -Encoding UTF8 }
+        Set-Content -LiteralPath $log -Value "" -Encoding UTF8
+
         try {
-            Expand-Archive -LiteralPath $Zip -DestinationPath $InstallDir -Force -ErrorAction Stop
+            Write-Log "Extraindo $Zip para $staging"
+            Expand-Archive -LiteralPath $Zip -DestinationPath $staging -Force -ErrorAction Stop
+
+            $src = $staging
+            if (-not (Test-Path -LiteralPath (Join-Path $src "StorageTerm.exe"))) {
+                $inner = Get-ChildItem -LiteralPath $staging -Directory | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName "StorageTerm.exe") } | Select-Object -First 1
+                if ($inner) { $src = $inner.FullName } else { throw "StorageTerm.exe não encontrado no pacote." }
+            }
+
+            $installedExe = Join-Path $InstallDir "StorageTerm.exe"
+            if (Test-Path -LiteralPath $installedExe) {
+                $locked = $true
+                for ($i = 0; $i -lt 10 -and $locked; $i++) {
+                    try {
+                        $fs = [System.IO.File]::Open($installedExe, 'Open', 'ReadWrite', 'None')
+                        $fs.Close()
+                        $locked = $false
+                    } catch { Start-Sleep -Seconds 1 }
+                }
+                if ($locked) { throw "StorageTerm.exe continua em uso; atualização abortada sem alterar a instalação." }
+            }
+
+            Write-Log "Copiando $src para $InstallDir"
+            & robocopy $src $InstallDir /E /R:5 /W:2 /NFL /NDL /NJH /NJS /NP | Out-Null
+            if ($LASTEXITCODE -ge 8) { throw "robocopy falhou (código $LASTEXITCODE)." }
+
             Remove-Item -LiteralPath $Zip -Force -ErrorAction SilentlyContinue
             $applied = $true
+            Write-Log "Atualização aplicada."
         } catch {
             # Mantém o zip para a próxima tentativa.
+            Write-Log ("Falha: " + $_.Exception.Message)
+        } finally {
+            Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
         }
 
         if ($Restart -and $applied) {

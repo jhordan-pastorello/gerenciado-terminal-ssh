@@ -73,6 +73,10 @@ powershell -ExecutionPolicy Bypass -File .\uninstall.ps1
 
 Para apagar também configurações e logs: `.\uninstall.ps1 -RemoveData`.
 
+## Solução de problemas
+
+- **`Could not load file or assembly ...` após uma atualização** (ex.: ao criar o ícone da bandeja): a pasta de instalação ficou com arquivos misturados. Reinstale com `install.ps1` ou baixe o zip da última release e extraia por cima de uma pasta limpa. O log da última atualização fica em `%LocalAppData%\StorageTerm\updater-last.log`.
+
 ## Atualizações automáticas
 
 Repositório: **https://github.com/jhordan-pastorello/gerenciado-terminal-ssh**

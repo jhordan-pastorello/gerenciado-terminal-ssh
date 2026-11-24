@@ -1456,6 +1456,7 @@ public partial class MainWindow : Window
         {
             Log.Error("Falha ao criar o ícone da bandeja.", ex);
             _tray = null;
+            ShowToast($"Bandeja indisponível: {ex.GetType().Name}: {ex.Message}", error: true);
         }
     }
 

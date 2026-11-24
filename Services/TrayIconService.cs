@@ -36,7 +36,7 @@ public sealed class TrayIconService : IDisposable
 
         _icon = new Icon(_iconStream);
 
-        _openItem = new WinForms.ToolStripMenuItem("Abrir StorageTerm") { Font = new Font("Segoe UI", 9f, FontStyle.Bold) };
+        _openItem = new WinForms.ToolStripMenuItem("Abrir StorageTerm") { Font = CreateFont(bold: true) };
         _openItem.Click += (_, _) => showWindow();
 
         _newSessionItem = new WinForms.ToolStripMenuItem("Nova sessão");
@@ -73,7 +73,7 @@ public sealed class TrayIconService : IDisposable
         _applyUpdateItem = new WinForms.ToolStripMenuItem("Atualizar")
         {
             Visible = false,
-            Font = new Font("Segoe UI", 9f, FontStyle.Bold)
+            Font = CreateFont(bold: true)
         };
         _applyUpdateItem.Click += (_, _) => applyUpdate();
 
@@ -95,9 +95,17 @@ public sealed class TrayIconService : IDisposable
             ShowImageMargin = true,
             ShowCheckMargin = true,
             Padding = new WinForms.Padding(3),
-            Font = new Font("Segoe UI", 9f),
-            Renderer = new WinForms.ToolStripProfessionalRenderer(new DarkColorTable())
+            Font = CreateFont(bold: false)
         };
+
+        try
+        {
+            menu.Renderer = new WinForms.ToolStripProfessionalRenderer(new DarkColorTable());
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Renderer escuro da bandeja indisponível; usando o padrão.", ex);
+        }
 
         menu.Items.Add(_openItem);
         menu.Items.Add(new WinForms.ToolStripSeparator());
@@ -135,6 +143,19 @@ public sealed class TrayIconService : IDisposable
 
         _notifyIcon.DoubleClick += (_, _) => showWindow();
         _notifyIcon.BalloonTipClicked += (_, _) => showWindow();
+    }
+
+    private static Font CreateFont(bool bold)
+    {
+        try
+        {
+            var baseFont = WinForms.Control.DefaultFont;
+            return bold ? new Font(baseFont, FontStyle.Bold) : (Font)baseFont.Clone();
+        }
+        catch
+        {
+            return SystemFonts.DefaultFont;
+        }
     }
 
     /// <summary>Mostra/oculta os itens "Atualizar para vX" e "Verificar atualizações".</summary>
