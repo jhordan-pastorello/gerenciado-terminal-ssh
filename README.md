@@ -136,7 +136,7 @@ Isso funciona com agentes CLI que aceitam caminho de arquivo (Kiro, Claude Code,
 - Sempre **2 painéis visíveis**, lado a lado.
 - Novos terminais entram **à direita**; o carrossel desliza até eles com animação suave.
 - **Sem limite** de terminais.
-- Rolagem lateral: dois dedos no touchpad, `Shift+wheel`, `Alt+PageUp/PageDown` ou a barra horizontal fina no rodapé.
+- Rolagem lateral: dois dedos no touchpad, `Shift+wheel`, `Alt+PageUp/PageDown` ou a barra horizontal fina no rodapé. O touchpad horizontal (dois dedos) é tratado direto pelo app, sem o PasteBridge.
 - Cada painel tem uma **cor própria** e uma faixa colorida no topo.
 - A barra superior mostra a **branch** do agente daquele painel; se não houver git, mostra `pasta: <nome>`.
 - Passar o mouse sobre um painel **dá foco** e atualiza a cor/branch na barra.

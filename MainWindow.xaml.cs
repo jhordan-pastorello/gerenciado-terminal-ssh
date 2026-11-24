@@ -19,6 +19,8 @@ public partial class MainWindow : Window
 {
     private const int WmHotkey = 0x0312;
     private const int WmLeftButtonDown = 0x0201;
+    private const int WmMouseHWheel = 0x020E;
+    private int _hwheelAccumulator;
 
     private const int HotkeyNew = 1001;
     private const int HotkeyClose = 1002;
@@ -483,18 +485,22 @@ public partial class MainWindow : Window
 
     private void PaneScroller_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
-        e.Handled = true;
-
         if ((Keyboard.Modifiers & ModifierKeys.Shift) != 0)
         {
+            e.Handled = true;
             ScrollCarousel(e.Delta > 0 ? -1 : 1);
             return;
         }
 
         // A roda vertical nunca vira rolagem horizontal do carrossel: sobre um
         // painel ela rola o histórico do terminal; nos vãos é ignorada. O
-        // carrossel continua em Shift+wheel, Alt+PageUp/PageDown e na barra.
-        FindPaneAtCursor()?.ForwardMouseWheel(e);
+        // carrossel continua em Shift+wheel, touchpad horizontal (WM_MOUSEHWHEEL),
+        // Alt+PageUp/PageDown e na barra.
+        var pane = FindPaneAtCursor();
+        if (pane == null) return;
+
+        e.Handled = true;
+        pane.ForwardMouseWheel(e);
     }
 
     private TerminalPane? FindPaneAtCursor()
@@ -1860,6 +1866,24 @@ public partial class MainWindow : Window
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
+        if (msg == WmMouseHWheel)
+        {
+            if (_panes.Count > 2)
+            {
+                _hwheelAccumulator += (short)((wParam.ToInt64() >> 16) & 0xFFFF);
+                while (Math.Abs(_hwheelAccumulator) >= 120)
+                {
+                    var sign = _hwheelAccumulator > 0 ? 1 : -1;
+                    _hwheelAccumulator -= sign * 120;
+                    ScrollCarousel(sign);
+                }
+
+                handled = true;
+            }
+
+            return IntPtr.Zero;
+        }
+
         if (msg == WmHotkey)
         {
             handled = true;
