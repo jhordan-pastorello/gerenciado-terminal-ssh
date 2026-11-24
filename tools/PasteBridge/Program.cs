@@ -187,13 +187,8 @@ internal sealed class BridgeContext : ApplicationContext
             {
                 if (wParam == (IntPtr)WmMouseWheel)
                 {
-                    var hwnd = _instance.FindTerminalForWheel(info.Point);
-                    if (hwnd != IntPtr.Zero)
+                    if (TryForwardWheel(_instance.FindTerminalForWheel(info.Point), info))
                     {
-                        var delta = (short)(info.MouseData >> 16);
-                        var wheelParam = (IntPtr)((delta & 0xFFFF) << 16);
-                        var positionParam = (IntPtr)((info.Point.X & 0xFFFF) | ((info.Point.Y & 0xFFFF) << 16));
-                        SendMessage(hwnd, WmMouseWheel, wheelParam, positionParam);
                         return (IntPtr)1;
                     }
                 }
@@ -207,6 +202,19 @@ internal sealed class BridgeContext : ApplicationContext
         }
 
         return CallNextHookEx(_mouseHook, nCode, wParam, lParam);
+    }
+
+    // Só engole a roda se ela foi de fato entregue a um terminal; caso
+    // contrário o evento segue para o sistema e não some.
+    private static bool TryForwardWheel(IntPtr hwnd, MsllHookStruct info)
+    {
+        if (hwnd == IntPtr.Zero || !IsWindow(hwnd)) return false;
+
+        var delta = (short)(info.MouseData >> 16);
+        var wheelParam = (IntPtr)((delta & 0xFFFF) << 16);
+        var positionParam = (IntPtr)((info.Point.X & 0xFFFF) | ((info.Point.Y & 0xFFFF) << 16));
+        SendMessage(hwnd, WmMouseWheel, wheelParam, positionParam);
+        return true;
     }
 
     private static IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
@@ -826,6 +834,9 @@ internal sealed class BridgeContext : ApplicationContext
 
     [DllImport("user32.dll")]
     private static extern bool IsIconic(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindow(IntPtr hWnd);
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetAncestor(IntPtr hWnd, uint gaFlags);

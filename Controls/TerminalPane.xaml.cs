@@ -37,6 +37,15 @@ public partial class TerminalPane : UserControl, IDisposable
     private MenuItem? _menuExternal;
     private SshProfile? _profile;
     private bool _disposed;
+    private static bool _forwardingWheel;
+
+    private const int WmMouseWheel = 0x020A;
+    private const int MkLButton = 0x0001;
+    private const int MkRButton = 0x0002;
+    private const int MkShift = 0x0004;
+    private const int MkControl = 0x0008;
+    private const int MkMButton = 0x0010;
+
     private static readonly Regex TerminalResponse =
         new(@"\x1b\[[?>][0-9;]*c", RegexOptions.Compiled);
 
@@ -316,6 +325,62 @@ public partial class TerminalPane : UserControl, IDisposable
                 Log.Warn($"Falha ao focar terminal: {ex.Message}");
             }
         });
+    }
+
+    /// <summary>
+    /// Entrega a roda do mouse ao terminal nativo (scrollback do PTY) em vez
+    /// de deixar o ScrollViewer do carrossel consumi-la.
+    /// </summary>
+    public bool ForwardMouseWheel(MouseWheelEventArgs e)
+    {
+        if (_disposed || _forwardingWheel) return false;
+
+        var native = GetNativeTerminalHandle();
+        if (native == IntPtr.Zero)
+        {
+            native = FindNativeTerminal();
+            if (!IsTerminalWindow(native)) return false;
+        }
+
+        if (!GetCursorPos(out var cursor)) return false;
+
+        var (wParam, lParam) = BuildMouseWheelParams(e.Delta, GetWheelKeyState(e), cursor.X, cursor.Y);
+
+        // Se o HWND nativo devolver a mensagem ao pai (DefWindowProc), o WPF
+        // dispararia a roda de novo; a flag evita reentrada.
+        _forwardingWheel = true;
+        try
+        {
+            SendMessage(native, WmMouseWheel, wParam, lParam);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Falha ao encaminhar a roda do mouse: {ex.Message}");
+            return false;
+        }
+        finally
+        {
+            _forwardingWheel = false;
+        }
+    }
+
+    public static (IntPtr WParam, IntPtr LParam) BuildMouseWheelParams(int delta, int keyState, int screenX, int screenY)
+    {
+        var wParam = (IntPtr)(((delta & 0xFFFF) << 16) | (keyState & 0xFFFF));
+        var lParam = (IntPtr)((screenX & 0xFFFF) | ((screenY & 0xFFFF) << 16));
+        return (wParam, lParam);
+    }
+
+    private static int GetWheelKeyState(MouseWheelEventArgs e)
+    {
+        var state = 0;
+        if (e.LeftButton == MouseButtonState.Pressed) state |= MkLButton;
+        if (e.RightButton == MouseButtonState.Pressed) state |= MkRButton;
+        if (e.MiddleButton == MouseButtonState.Pressed) state |= MkMButton;
+        if ((Keyboard.Modifiers & ModifierKeys.Shift) != 0) state |= MkShift;
+        if ((Keyboard.Modifiers & ModifierKeys.Control) != 0) state |= MkControl;
+        return state;
     }
 
     private IntPtr GetNativeTerminalHandle()
@@ -783,6 +848,9 @@ public partial class TerminalPane : UserControl, IDisposable
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetFocus();
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SendMessage(IntPtr hWnd, int message, IntPtr wParam, IntPtr lParam);
 
     private static Brush Frozen(string hex)
     {

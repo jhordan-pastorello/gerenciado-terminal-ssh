@@ -482,9 +482,18 @@ public partial class MainWindow : Window
 
     private void PaneScroller_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
-        if ((Keyboard.Modifiers & ModifierKeys.Shift) == 0) return;
-        ScrollCarousel(e.Delta > 0 ? -1 : 1);
         e.Handled = true;
+
+        if ((Keyboard.Modifiers & ModifierKeys.Shift) != 0)
+        {
+            ScrollCarousel(e.Delta > 0 ? -1 : 1);
+            return;
+        }
+
+        // A roda vertical nunca vira rolagem horizontal do carrossel: sobre um
+        // painel ela rola o histórico do terminal; nos vãos é ignorada. O
+        // carrossel continua em Shift+wheel, Alt+PageUp/PageDown e na barra.
+        FindPaneAtCursor()?.ForwardMouseWheel(e);
     }
 
     private TerminalPane? FindPaneAtCursor()
